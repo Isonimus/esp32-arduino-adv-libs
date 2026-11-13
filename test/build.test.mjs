@@ -151,7 +151,7 @@ if [ $SKIP_ENV -eq 0 ]; then
 fi
 `;
 const AR = '9b3364c613c071a2e7322d49d467fd2166dbc70e';
-const TU = '93b53158f02bce9497419298ac27150eebe567d3';
+const TU = '91214b46142186b6c30ea468779c7ad39e1bc605';
 
 test('pinBuildSources force-checks-out both floating repos to their pinned commits', () => {
   const out = pinBuildSources(BUILD_SH, { arduinoCommit: AR, tinyusbCommit: TU });

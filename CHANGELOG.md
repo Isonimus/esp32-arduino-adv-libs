@@ -67,6 +67,17 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   builder master already carries `-std=gnu++2a` on that line; the overlay now rewrites the cloned
   builder's `CMakeLists.txt` to match (`builderCxxStandard` in `UPSTREAM.lock`, applied by
   `setBuilderCxxStandard`, fail-loud if the expected flag is absent).
+- **tinyusb re-pinned to the stock builder's era (ADR-0008).** With C++20 in place, esp32
+  built fully green and esp32s3 reached `arduino_tinyusb/src/dcd_dwc2.c`, failing with
+  `'dwc2_regs_t' has no member named 'ghwcfg2_bm'` and `conflicting types for
+  'dcd_edpt_xfer'`. That driver is vendored by the lib-builder and compiled against the
+  tinyusb it clones; ADR-0005 had pinned tinyusb to the blob's 2025-12-05 commit
+  (`93b53158`), whose upstream had since dropped the DWC2 `_bm` register API the builder's
+  Jan-2025 vendored driver uses. The blob's snapshot is coherent with the blob's own builder
+  fork, not with the stock espressif builder we build on. `tinyusbCommit` is now
+  `91214b46` (tinyusb master at the builder's own commit date), what the stock builder would
+  itself have cloned. This refines ADR-0005's tinyusb value (a source pin's anchor is the
+  stock builder's era, not the blob's); the IDF and arduino pins already matched the builder.
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing
