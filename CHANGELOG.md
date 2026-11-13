@@ -35,6 +35,14 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   `upstream.idfBranch` (`release/v5.5`), passed to `build.sh -I`; the build fails
   loud if it is absent. Also fixed the container `safe.directory` so in-container
   git works on the runner-owned mount.
+- **Managed-component versions pinned (ADR-0004).** Upstream declares
+  `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
+  manager resolved a newer `esp-tflite-micro` that broke the build by forcing
+  `-std=c++11` on its own C++17 code. `UPSTREAM.lock` now carries
+  `managedComponentPins`, applied to the cloned builder's `main/idf_component.yml`
+  before build; `esp-tflite-micro` is pinned to `==1.3.5`, the version inside the
+  reference blob the consumers run today. The other floating components remain
+  tracked in the ledger.
 
 The CI build and the `v0.0.1` tag are intentionally unproven at bootstrap:
 standing invariants 4 and 5 stay pending in `LEDGER.md` until a tagged build is

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand } from '../scripts/build.mjs';
+import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions } from '../scripts/build.mjs';
 
 const BASE = 'ubuntu:22.04';
 const DIGEST = 'sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c';
@@ -117,4 +117,55 @@ test('chipBuildCommand refuses a missing idfBranch rather than build the wrong I
 
 test('chipBuildCommand refuses a missing chip', () => {
   assert.throws(() => chipBuildCommand('', 'release/v5.5'), /chip is required/);
+});
+
+// --- pinComponentVersions (ADR-0004): pin a floating managed-component version ----------------------
+
+const MANIFEST = `dependencies:
+  idf: ">=5.3"
+  espressif/esp32-camera:
+    version: "master"
+    git: https://github.com/espressif/esp32-camera.git
+    require: public
+  espressif/esp-tflite-micro:
+    version: ">=1.2.0"
+    require: public
+    rules:
+      - if: "target not in [esp32c2]"
+  espressif/esp-sr:
+    version: ">=1.4.2"
+`;
+
+test('pinComponentVersions pins the targeted component and leaves others untouched', () => {
+  const out = pinComponentVersions(MANIFEST, { 'espressif/esp-tflite-micro': '==1.3.5' });
+  assert.match(out, /espressif\/esp-tflite-micro:\n {4}version: "==1\.3\.5"/);
+  // The neighbouring components keep their original specs.
+  assert.match(out, /espressif\/esp32-camera:\n {4}version: "master"/);
+  assert.match(out, /espressif\/esp-sr:\n {4}version: ">=1\.4\.2"/);
+  // Non-version keys of the pinned block survive.
+  assert.match(out, /espressif\/esp-tflite-micro:\n {4}version: "==1\.3\.5"\n {4}require: public/);
+});
+
+test('pinComponentVersions rewrites only the pinned block, not a same-named key elsewhere', () => {
+  // esp32-camera also has a version line; pinning tflite must not touch it.
+  const out = pinComponentVersions(MANIFEST, { 'espressif/esp-tflite-micro': '==1.3.5' });
+  assert.ok(!/espressif\/esp32-camera:\n {4}version: "==1\.3\.5"/.test(out));
+});
+
+test('pinComponentVersions fails loud on an absent component rather than silently no-op', () => {
+  assert.throws(
+    () => pinComponentVersions(MANIFEST, { 'espressif/does-not-exist': '==1.0.0' }),
+    /not found in manifest/,
+  );
+});
+
+test('pinComponentVersions fails loud when the component block has no version line', () => {
+  const noVersion = `dependencies:
+  espressif/weird:
+    require: public
+`;
+  assert.throws(
+    () => pinComponentVersions(noVersion, { 'espressif/weird': '==1.0.0' }),
+    /no "version:" line/,
+  );
 });

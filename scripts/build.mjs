@@ -115,7 +115,7 @@ export function chipBuildCommand(chip, idfBranch) {
 
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
-  const { upstream, enabledChips } = lock();
+  const { upstream, enabledChips, managedComponentPins } = lock();
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
@@ -123,7 +123,7 @@ function cmdChip(args) {
     throw new Error('UPSTREAM.lock upstream.idfBranch is required (the builder defaults to release/v5.3; see ADR-0003)');
   }
   const builderDir = cloneUpstream(args.work, upstream);
-  applyOverlay(builderDir);
+  applyOverlay(builderDir, managedComponentPins);
 
   // Build inside our image; override the entrypoint so we run build.sh directly. The container
   // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
@@ -147,9 +147,45 @@ function cmdChip(args) {
   console.log(`exported ${tars[0]} to ${args.dist}`);
 }
 
-// Apply our delta onto the cloned tree: ordered patch stack, then sdkconfig overlay. Both are empty
-// for v0.0.1; the loops exist so the baseline and the later patched releases share one code path.
-function applyOverlay(builderDir) {
+/**
+ * Rewrite the version spec of named managed components in an idf_component.yml. The upstream
+ * builder declares its ML/camera/matter dependencies as floating minimums (e.g. esp-tflite-micro
+ * ">=1.2.0"), so the component manager resolves "latest" at build time: unreproducible, and the
+ * reason a newer esp-tflite-micro broke the build (ADR-0004). Pinning rewrites only the targeted
+ * component's `version:` line, leaving its other keys (git, require, rules) untouched. Pure:
+ * takes and returns text. Fails loud if a pinned component, or its version line, is absent, so a
+ * stale pin cannot silently no-op.
+ */
+export function pinComponentVersions(manifestText, pins) {
+  const lines = manifestText.split('\n');
+  for (const [component, version] of Object.entries(pins)) {
+    const escaped = component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keyRe = new RegExp(`^(\\s+)${escaped}:\\s*$`);
+    let keyIdx = -1;
+    let keyIndent = '';
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(keyRe);
+      if (m) { keyIdx = i; keyIndent = m[1]; break; }
+    }
+    if (keyIdx === -1) throw new Error(`pinComponentVersions: component "${component}" not found in manifest`);
+    let versionIdx = -1;
+    for (let i = keyIdx + 1; i < lines.length; i++) {
+      if (lines[i].trim() === '') continue;
+      const indent = lines[i].match(/^(\s*)/)[1];
+      if (indent.length <= keyIndent.length) break; // left this component's block
+      if (/^\s+version:\s*/.test(lines[i])) { versionIdx = i; break; }
+    }
+    if (versionIdx === -1) throw new Error(`pinComponentVersions: no "version:" line for "${component}"`);
+    lines[versionIdx] = lines[versionIdx].replace(/^(\s+version:\s*).*$/, `$1"${version}"`);
+  }
+  return lines.join('\n');
+}
+
+// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, then managed-component
+// version pins. All three are optional; the loops exist so the empty baseline and the later patched
+// releases share one code path. Component pins (UPSTREAM.lock managedComponentPins) are applied as a
+// manifest rewrite, not a numbered source patch: they are build config, not a consumer-ADR feature.
+function applyOverlay(builderDir, managedComponentPins) {
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
     run('git', ['-C', builderDir, 'apply', '--verbose', join(PATCHES_DIR, f)]);
@@ -159,7 +195,13 @@ function applyOverlay(builderDir) {
       cpSync(join(SDKCONFIG_DIR, f), join(builderDir, 'configs', f));
     }
   }
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig overlay ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}`);
+  const pins = managedComponentPins ?? {};
+  if (Object.keys(pins).length) {
+    const manifestPath = join(builderDir, 'main', 'idf_component.yml');
+    writeFileSync(manifestPath, pinComponentVersions(readFileSync(manifestPath, 'utf8'), pins));
+  }
+  const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, component pins ${pinSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---
