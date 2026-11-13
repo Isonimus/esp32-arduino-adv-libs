@@ -150,7 +150,7 @@ if [ $SKIP_ENV -eq 0 ]; then
     if [ $? -ne 0 ]; then exit 1; fi
 fi
 `;
-const AR = '32709d56deb6030b2aa16a456a8c7c1c9e20a7e9';
+const AR = '9b3364c613c071a2e7322d49d467fd2166dbc70e';
 const TU = '93b53158f02bce9497419298ac27150eebe567d3';
 
 test('pinBuildSources force-checks-out both floating repos to their pinned commits', () => {

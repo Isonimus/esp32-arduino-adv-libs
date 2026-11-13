@@ -40,9 +40,13 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   drift apart and broke both chips (tinyusb master dropped a file the pinned CMake
   lists; arduino master needed an esp_matter header its floating range lacked).
   `UPSTREAM.lock` now carries `sourcePins` fixing all three to the exact commits
-  inside the reference blob (IDF via `build.sh -i`, arduino and tinyusb via
-  force-checkouts the overlay injects into `build.sh`), and `esp_matter` is pinned
-  to `1.4.1`. This supersedes ADR-0003's float-the-branch choice.
+  of that snapshot (IDF via `build.sh -i`, arduino and tinyusb via force-checkouts
+  the overlay injects into `build.sh`), and `esp_matter` is pinned to `1.4.1`. Each
+  pin must be reachable from a clonable ref on its upstream; arduino is pinned to the
+  espressif-upstream base commit the blob compiled from (`9b3364c6`), not the blob's
+  own downstream-fork wrapper SHA, which is byte-identical in source but unreachable
+  from any espressif ref (ADR-0005, incl. its 2026-11-13 amendment). This supersedes
+  ADR-0003's float-the-branch choice.
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing

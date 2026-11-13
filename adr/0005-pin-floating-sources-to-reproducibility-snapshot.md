@@ -91,3 +91,37 @@ the whole point, and anything looser reintroduces the drift this ADR removes.
   for full transitive reproducibility is the remaining component-locking work, tracked in LEDGER.
 - Pinning arduino and tinyusb by injecting into `build.sh` couples us to that anchor text; the
   injection fails loud if upstream moves it, so the coupling surfaces at build time, not silently.
+
+## Amendment 2026-11-13: the arduino pin must be reachable, and the blob's SHA was a downstream fork's
+
+The first build on these pins (run `43494803612`, commit `c4d9cdd`) failed on the arduino
+checkout: `fatal: reference is not a tree: 32709d56deb6030b2aa16a456a8c7c1c9e20a7e9`. The
+Decision table above pins arduino to `32709d56...` and attributes it to `espressif/arduino-esp32`.
+Both halves were wrong, and the error exposed an unstated requirement.
+
+A pin works only if its commit is **reachable from a clonable ref** on the upstream the builder
+clones: a plain `git clone` downloads commits reachable from branches and tags, not every loose
+object the server happens to keep. `32709d56` is reachable from no espressif ref: it is diverged
+from `master` and from `idf-release/v5.5` (ahead 10, behind 527), and is the head of no branch, tag,
+or PR. The server still answers an API fetch for it by SHA (GitHub retains the object), which is why
+it looked "present" when this ADR was written, but a clone never pulls it, so the checkout cannot
+find it. The esp-idf (`8410210c9a`, a strict ancestor of `release/v5.5`) and tinyusb (`93b53158f`)
+pins are reachable, and their checkouts succeeded.
+
+The commit is also not espressif's. The reference blob's `versions.txt` records arduino as this SHA,
+but it is `bmorcelli/arduino-esp32` **master** (the Bruce fork the blob is built by, `AR_USER`
+defaulting to the repo owner in their CI). Its ten extra commits over the espressif base are nine
+`Merge branch 'espressif:master'` commits and one `.github/workflows/Compila_componente.yml` (the
+fork's own CI); **no arduino source differs.** The espressif-upstream commit the blob's arduino
+actually compiled from is the merge base `9b3364c613c071a2e7322d49d467fd2166dbc70e`
+(`espressif/arduino-esp32` master, 2025-12-04, `feat(matter): adds water leak detector ep #12102`),
+which is a strict ancestor of espressif master and therefore reachable.
+
+The pin is corrected in `UPSTREAM.lock` to `9b3364c6...`: byte-identical arduino source to the blob,
+espressif-native (no Bruce dependency, which is the project's whole point), and clonable. The
+Decision stands unchanged: pin every floating input to the blob's exact, mutually-consistent set. We
+pinned the wrong object for arduino (a downstream fork's cosmetic wrapper), not the wrong idea. The
+reachability requirement is now stated in `UPSTREAM.lock`'s `sourcePinsComment` and tracked for an
+automated check in `LEDGER.md`; a `-i <idf-commit>` interaction this surfaced (it makes the builder's
+arduino-branch autodetect fall back to `master`, which the injected checkout then overrides to the
+pinned commit) is harmless here because we pin arduino explicitly.
