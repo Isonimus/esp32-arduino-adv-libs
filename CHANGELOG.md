@@ -58,6 +58,15 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   library, which is guarded by `CONFIG_ESP_MATTER_ENABLE_DATA_MODEL`. `esp_matter` is no longer in
   `managedComponentPins`. The rest of the unused stack still builds and is tracked for a follow-up
   slimming in the ledger.
+- **Builder C++ standard bumped to C++20 (ADR-0007).** With the components right, the build reached
+  the real compile and failed on both chips with the same error class: `emplace_back(a, b)` on a
+  braceless-aggregate struct (`HTTPClient::RequestArgument` on esp32, `esp-dl`'s `img_s` on esp32s3),
+  which is legal only from C++20 (P0960). The builder's `idf-release_v5.5` branch forces the whole
+  project to `-std=gnu++17` (appended after IDF 5.5's own `-std=gnu++2b`, so it wins) via its root
+  `CMakeLists.txt`, while the arduino master base we pin (ADR-0005) needs C++20. Espressif's own
+  builder master already carries `-std=gnu++2a` on that line; the overlay now rewrites the cloned
+  builder's `CMakeLists.txt` to match (`builderCxxStandard` in `UPSTREAM.lock`, applied by
+  `setBuilderCxxStandard`, fail-loud if the expected flag is absent).
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing

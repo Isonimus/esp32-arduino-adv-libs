@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions, pinBuildSources, removeManagedComponents } from '../scripts/build.mjs';
+import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions, pinBuildSources, removeManagedComponents, setBuilderCxxStandard } from '../scripts/build.mjs';
 
 const BASE = 'ubuntu:22.04';
 const DIGEST = 'sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c';
@@ -268,5 +268,41 @@ test('removeManagedComponents fails loud on an absent component rather than sile
   assert.throws(
     () => removeManagedComponents(MANIFEST_WITH_MATTER, ['espressif/not-here']),
     /not found in manifest/,
+  );
+});
+
+// --- setBuilderCxxStandard (ADR-0007): bump the builder's forced C++ standard to C++20 -------------
+
+// Mirrors the real builder root CMakeLists.txt line 42: gnu++17 is appended after IDF's gnu++2b, so
+// the last flag wins and the project compiles as C++17, which the newer arduino/esp-dl cannot.
+const CMAKE_WITH_GNU17 = `cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-DCHIP_HAVE_CONFIG_H" APPEND)
+project(arduino-lib-builder)
+`;
+
+test('setBuilderCxxStandard rewrites the forced standard and leaves the rest of the line intact', () => {
+  const out = setBuilderCxxStandard(CMAKE_WITH_GNU17, { from: 'gnu++17', to: 'gnu++2a' });
+  assert.ok(!out.includes('-std=gnu++17'), 'the old standard flag is gone');
+  assert.match(out, /CXX_COMPILE_OPTIONS "-std=gnu\+\+2a;-DCHIP_HAVE_CONFIG_H" APPEND/, 'only the std flag changed; the CHIP define and APPEND stay');
+  assert.match(out, /^project\(arduino-lib-builder\)$/m, 'unrelated lines untouched');
+});
+
+test('setBuilderCxxStandard fails loud when the expected standard is absent rather than silently no-op', () => {
+  assert.throws(
+    () => setBuilderCxxStandard('project(x)\n', { from: 'gnu++17', to: 'gnu++2a' }),
+    /not found in CMakeLists\.txt/,
+  );
+});
+
+test('setBuilderCxxStandard fails loud on a malformed pin rather than writing "-std=undefined"', () => {
+  // A dropped "to" key must not pass the from-present check and then write a corrupt flag.
+  assert.throws(
+    () => setBuilderCxxStandard(CMAKE_WITH_GNU17, { from: 'gnu++17' }),
+    /must be non-empty strings/,
+  );
+  assert.throws(
+    () => setBuilderCxxStandard(CMAKE_WITH_GNU17, { from: '', to: 'gnu++2a' }),
+    /must be non-empty strings/,
   );
 });

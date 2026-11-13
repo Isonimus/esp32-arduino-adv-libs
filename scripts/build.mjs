@@ -144,7 +144,7 @@ export function pinBuildSources(buildShText, { arduinoCommit, tinyusbCommit }) {
 
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
-  const { upstream, enabledChips, managedComponentPins, sourcePins, removedComponents } = lock();
+  const { upstream, enabledChips, managedComponentPins, sourcePins, removedComponents, builderCxxStandard } = lock();
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
@@ -154,8 +154,11 @@ function cmdChip(args) {
   if (!sourcePins?.idfCommit) {
     throw new Error('UPSTREAM.lock sourcePins.idfCommit is required (pin the IDF commit, not the floating branch head; see ADR-0005)');
   }
+  if (!builderCxxStandard?.from || !builderCxxStandard?.to) {
+    throw new Error('UPSTREAM.lock builderCxxStandard {from,to} is required: the pinned arduino master base needs C++20, but the builder forces gnu++17, so without this overlay the build fails deep in the compile (see ADR-0007)');
+  }
   const builderDir = cloneUpstream(args.work, upstream);
-  applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents);
+  applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents, builderCxxStandard);
 
   // Build inside our image; override the entrypoint so we run build.sh directly. The container
   // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
@@ -247,13 +250,38 @@ export function removeManagedComponents(manifestText, names) {
   return lines.join('\n');
 }
 
-// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, managed-component
-// removals, version pins, then floating-source commit pins. All are optional; the loops exist so the
-// empty baseline and the later patched releases share one code path. Removals and pins (removedComponents,
+/**
+ * Rewrite the C++ standard the builder forces on the whole project, in its root CMakeLists.txt.
+ * The builder's `idf-release_v5.5` branch (our pin e68e301) carries
+ * `idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;...")`, which appends `-std=gnu++17`
+ * after IDF 5.5's own `-std=gnu++2b`, so the last flag wins and the whole project compiles as
+ * C++17. But we pin arduino-esp32 to a master-base commit (ADR-0005) newer than that stale branch
+ * expects, and that arduino (and esp-dl) build aggregates with parenthesized constructor calls
+ * (`vec.emplace_back(a, b)` on a braceless-aggregate struct), which is legal only from C++20 (P0960):
+ * under gnu++17 both fail with "no matching function for call". Espressif's own builder master already
+ * bumped this line to `-std=gnu++2a`; we match that. Pure: takes and returns text. Fails loud if the
+ * `from` flag is absent, so an upstream change to this line cannot silently no-op the fix (ADR-0007).
+ */
+export function setBuilderCxxStandard(cmakeText, { from, to }) {
+  if (typeof from !== 'string' || !from || typeof to !== 'string' || !to) {
+    throw new Error(`setBuilderCxxStandard: both "from" and "to" must be non-empty strings, got from=${JSON.stringify(from)} to=${JSON.stringify(to)} (a malformed builderCxxStandard would otherwise write "-std=undefined"; ADR-0007)`);
+  }
+  const fromFlag = `-std=${from}`;
+  const toFlag = `-std=${to}`;
+  if (!cmakeText.includes(fromFlag)) {
+    throw new Error(`setBuilderCxxStandard: expected "${fromFlag}" not found in CMakeLists.txt (upstream may have changed the CXX_COMPILE_OPTIONS line; re-check the pin against the builder tree, ADR-0007)`);
+  }
+  return cmakeText.split(fromFlag).join(toFlag);
+}
+
+// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, builder C++ standard,
+// managed-component removals, version pins, then floating-source commit pins. All are optional; the
+// loops exist so the empty baseline and the later patched releases share one code path. The C++ standard
+// rewrite touches the builder's root CMakeLists.txt; removals and pins (removedComponents,
 // managedComponentPins) rewrite main/idf_component.yml; source pins (sourcePins.arduinoCommit/tinyusbCommit)
 // inject force-checkouts into build.sh. All are build config applied as overlay rewrites, not numbered
-// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005, ADR-0006).
-function applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents) {
+// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005, ADR-0006, ADR-0007).
+function applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents, builderCxxStandard) {
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
     run('git', ['-C', builderDir, 'apply', '--verbose', join(PATCHES_DIR, f)]);
@@ -262,6 +290,10 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins, removedCompo
     for (const f of readdirSync(SDKCONFIG_DIR)) {
       cpSync(join(SDKCONFIG_DIR, f), join(builderDir, 'configs', f));
     }
+  }
+  if (builderCxxStandard) {
+    const cmakePath = join(builderDir, 'CMakeLists.txt');
+    writeFileSync(cmakePath, setBuilderCxxStandard(readFileSync(cmakePath, 'utf8'), builderCxxStandard));
   }
   const manifestPath = join(builderDir, 'main', 'idf_component.yml');
   const removals = removedComponents ?? [];
@@ -281,7 +313,8 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins, removedCompo
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, removed components ${removeSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  const cxxSummary = builderCxxStandard ? `${builderCxxStandard.from} -> ${builderCxxStandard.to}` : 'none';
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed components ${removeSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---
