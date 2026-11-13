@@ -35,6 +35,14 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   `upstream.idfBranch` (`release/v5.5`), passed to `build.sh -I`; the build fails
   loud if it is absent. Also fixed the container `safe.directory` so in-container
   git works on the runner-owned mount.
+- **All floating build inputs pinned to one snapshot (ADR-0005).** The builder
+  also clones ESP-IDF, arduino-esp32, and tinyusb at floating branch heads, which
+  drift apart and broke both chips (tinyusb master dropped a file the pinned CMake
+  lists; arduino master needed an esp_matter header its floating range lacked).
+  `UPSTREAM.lock` now carries `sourcePins` fixing all three to the exact commits
+  inside the reference blob (IDF via `build.sh -i`, arduino and tinyusb via
+  force-checkouts the overlay injects into `build.sh`), and `esp_matter` is pinned
+  to `1.4.1`. This supersedes ADR-0003's float-the-branch choice.
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing

@@ -100,30 +100,62 @@ function cloneUpstream(work, upstream) {
 }
 
 // --- chip: build one chip inside the image and export its tar ---
-// The in-container bash command for a chip build. The IDF branch is passed explicitly: the
-// upstream builder's tools/config.sh defaults IDF_BRANCH to release/v5.3, so a build.sh with
-// no -I silently builds the wrong IDF (ADR-0003). safe.directory comes first: the clone is
-// owned by the runner user but the container runs as root, so without it git rejects
-// /workspace as "dubious ownership" and every rev-parse the lib-builder runs for version
-// detection fails (which then breaks patch application and CMake source resolution); '*'
-// also covers IDF's nested submodule worktrees. -e archives the per-chip result to dist/.
-export function chipBuildCommand(chip, idfBranch) {
+// The in-container bash command for a chip build. The IDF is pinned two ways: -I selects the
+// branch to clone (the builder's tools/config.sh defaults IDF_BRANCH to release/v5.3, so without
+// -I it silently builds the wrong IDF), and -i checks out an exact commit on that branch so the
+// build is reproducible rather than tracking a floating branch head (ADR-0005, superseding
+// ADR-0003). safe.directory comes first: the clone is owned by the runner user but the container
+// runs as root, so without it git rejects /workspace as "dubious ownership" and every rev-parse
+// the lib-builder runs for version detection fails (which then breaks patch application, source
+// checkout, and CMake source resolution); '*' also covers IDF's nested submodule worktrees. -e
+// archives the per-chip result to dist/.
+export function chipBuildCommand(chip, idfBranch, idfCommit) {
   if (!chip) throw new Error('chipBuildCommand: chip is required');
   if (!idfBranch) throw new Error('chipBuildCommand: idfBranch is required');
-  return `git config --global --add safe.directory '*' && ./build.sh -e -I ${idfBranch} -t ${chip}`;
+  if (!idfCommit) throw new Error('chipBuildCommand: idfCommit is required');
+  return `git config --global --add safe.directory '*' && ./build.sh -e -I ${idfBranch} -i ${idfCommit} -t ${chip}`;
+}
+
+/**
+ * Pin the floating source repos the builder clones at build time to exact commits. build.sh clones
+ * arduino-esp32 (install-arduino.sh) and tinyusb (update-components.sh) at a floating branch head,
+ * which drift and break: today tinyusb master dropped a file the pinned CMake still lists, and
+ * arduino master needs an esp_matter header its resolved version lacks. We insert force-checkouts
+ * right after those clones run, so the full clones are moved to the reproducibility snapshot before
+ * the build configures (ADR-0005). IDF is pinned separately via build.sh -i, so it is not repeated
+ * here. Pure: rewrites and returns the build.sh text; fails loud if the anchor or a pin is missing,
+ * so an upstream script change cannot silently skip pinning.
+ */
+export function pinBuildSources(buildShText, { arduinoCommit, tinyusbCommit }) {
+  if (!arduinoCommit) throw new Error('pinBuildSources: arduinoCommit is required');
+  if (!tinyusbCommit) throw new Error('pinBuildSources: tinyusbCommit is required');
+  const anchor = '    # install arduino component\n    ./tools/install-arduino.sh\n    if [ $? -ne 0 ]; then exit 1; fi\n';
+  if (!buildShText.includes(anchor)) {
+    throw new Error('pinBuildSources: install-arduino anchor not found in build.sh (upstream layout changed)');
+  }
+  const injected = anchor +
+    '\n    # [adv-libs overlay] pin floating sources to the reproducibility snapshot (ADR-0005)\n' +
+    `    git -C components/arduino_tinyusb/tinyusb checkout ${tinyusbCommit}\n` +
+    '    if [ $? -ne 0 ]; then exit 1; fi\n' +
+    `    git -C components/arduino checkout ${arduinoCommit}\n` +
+    '    if [ $? -ne 0 ]; then exit 1; fi\n';
+  return buildShText.replace(anchor, injected);
 }
 
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
-  const { upstream, enabledChips, managedComponentPins } = lock();
+  const { upstream, enabledChips, managedComponentPins, sourcePins } = lock();
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
   if (!upstream.idfBranch) {
-    throw new Error('UPSTREAM.lock upstream.idfBranch is required (the builder defaults to release/v5.3; see ADR-0003)');
+    throw new Error('UPSTREAM.lock upstream.idfBranch is required (the builder defaults to release/v5.3; see ADR-0003, ADR-0005)');
+  }
+  if (!sourcePins?.idfCommit) {
+    throw new Error('UPSTREAM.lock sourcePins.idfCommit is required (pin the IDF commit, not the floating branch head; see ADR-0005)');
   }
   const builderDir = cloneUpstream(args.work, upstream);
-  applyOverlay(builderDir, managedComponentPins);
+  applyOverlay(builderDir, managedComponentPins, sourcePins);
 
   // Build inside our image; override the entrypoint so we run build.sh directly. The container
   // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
@@ -135,7 +167,7 @@ function cmdChip(args) {
     '-v', `${resolve(builderDir)}:/workspace`, '-w', '/workspace',
     '-e', 'IDF_COMPONENT_OVERWRITE_MANAGED_COMPONENTS=1',
     '--entrypoint', 'bash',
-    args.image, '-c', chipBuildCommand(args.chip, upstream.idfBranch),
+    args.image, '-c', chipBuildCommand(args.chip, upstream.idfBranch, sourcePins.idfCommit),
   ]);
 
   const tars = readdirSync(join(builderDir, 'dist')).filter((f) => f.startsWith(`arduino-esp32-libs-${args.chip}-`) && f.endsWith('.tar.gz'));
@@ -181,11 +213,13 @@ export function pinComponentVersions(manifestText, pins) {
   return lines.join('\n');
 }
 
-// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, then managed-component
-// version pins. All three are optional; the loops exist so the empty baseline and the later patched
-// releases share one code path. Component pins (UPSTREAM.lock managedComponentPins) are applied as a
-// manifest rewrite, not a numbered source patch: they are build config, not a consumer-ADR feature.
-function applyOverlay(builderDir, managedComponentPins) {
+// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, managed-component
+// version pins, then floating-source commit pins. All are optional; the loops exist so the empty
+// baseline and the later patched releases share one code path. Component pins (managedComponentPins)
+// rewrite main/idf_component.yml; source pins (sourcePins.arduinoCommit/tinyusbCommit) inject
+// force-checkouts into build.sh. Both are build config applied as overlay rewrites, not numbered
+// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005).
+function applyOverlay(builderDir, managedComponentPins, sourcePins) {
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
     run('git', ['-C', builderDir, 'apply', '--verbose', join(PATCHES_DIR, f)]);
@@ -200,8 +234,15 @@ function applyOverlay(builderDir, managedComponentPins) {
     const manifestPath = join(builderDir, 'main', 'idf_component.yml');
     writeFileSync(manifestPath, pinComponentVersions(readFileSync(manifestPath, 'utf8'), pins));
   }
+  if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) {
+    const buildShPath = join(builderDir, 'build.sh');
+    writeFileSync(buildShPath, pinBuildSources(readFileSync(buildShPath, 'utf8'), sourcePins));
+  }
   const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, component pins ${pinSummary}`);
+  const srcSummary = sourcePins
+    ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
+    : 'none';
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---

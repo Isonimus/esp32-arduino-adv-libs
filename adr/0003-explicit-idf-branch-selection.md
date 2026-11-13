@@ -2,10 +2,10 @@
 id: '0003'
 title: "The IDF version is selected explicitly, not inferred from the pinned builder"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-11-13
 supersedes: []
-superseded_by: []
+superseded_by: ['0005']
 ---
 
 ## Context

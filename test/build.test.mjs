@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions } from '../scripts/build.mjs';
+import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions, pinBuildSources } from '../scripts/build.mjs';
 
 const BASE = 'ubuntu:22.04';
 const DIGEST = 'sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c';
@@ -96,27 +96,86 @@ test('reconcileVersions fails loud when two chips disagree on resolved sources',
   }
 });
 
-// --- chipBuildCommand (ADR-0003): the IDF branch must be selected explicitly ------------------------
+// --- chipBuildCommand (ADR-0003, ADR-0005): IDF selected by branch AND pinned by commit -------------
+
+const SHA = '8410210c9a0427be9655a855ddfa3dc9c38a6aad';
 
 test('chipBuildCommand passes -I <idfBranch> so the build does not fall back to the builder default', () => {
   // The upstream config.sh defaults IDF_BRANCH to release/v5.3; dropping -I silently builds 5.3.
-  const cmd = chipBuildCommand('esp32', 'release/v5.5');
+  const cmd = chipBuildCommand('esp32', 'release/v5.5', SHA);
   assert.match(cmd, /\.\/build\.sh .*-I release\/v5\.5\b/);
   assert.match(cmd, /-t esp32\b/);
 });
 
+test('chipBuildCommand pins the IDF commit with -i so the build does not track a floating branch head', () => {
+  const cmd = chipBuildCommand('esp32', 'release/v5.5', SHA);
+  assert.match(cmd, new RegExp(`-i ${SHA}\\b`));
+});
+
 test('chipBuildCommand marks the mounted tree safe before invoking build.sh', () => {
-  const cmd = chipBuildCommand('esp32s3', 'release/v5.5');
+  const cmd = chipBuildCommand('esp32s3', 'release/v5.5', SHA);
   assert.match(cmd, /^git config --global --add safe\.directory '\*' && \.\/build\.sh/);
 });
 
 test('chipBuildCommand refuses a missing idfBranch rather than build the wrong IDF', () => {
-  assert.throws(() => chipBuildCommand('esp32', ''), /idfBranch is required/);
-  assert.throws(() => chipBuildCommand('esp32', undefined), /idfBranch is required/);
+  assert.throws(() => chipBuildCommand('esp32', '', SHA), /idfBranch is required/);
+  assert.throws(() => chipBuildCommand('esp32', undefined, SHA), /idfBranch is required/);
+});
+
+test('chipBuildCommand refuses a missing idfCommit rather than track a floating head', () => {
+  assert.throws(() => chipBuildCommand('esp32', 'release/v5.5', ''), /idfCommit is required/);
+  assert.throws(() => chipBuildCommand('esp32', 'release/v5.5', undefined), /idfCommit is required/);
 });
 
 test('chipBuildCommand refuses a missing chip', () => {
-  assert.throws(() => chipBuildCommand('', 'release/v5.5'), /chip is required/);
+  assert.throws(() => chipBuildCommand('', 'release/v5.5', SHA), /chip is required/);
+});
+
+// --- pinBuildSources (ADR-0005): pin arduino + tinyusb clones to exact commits ----------------------
+
+const BUILD_SH = `mkdir -p dist
+
+if [ $SKIP_ENV -eq 0 ]; then
+    echo "* Installing/Updating ESP-IDF and all components..."
+    # update components from git
+    ./tools/update-components.sh
+    if [ $? -ne 0 ]; then exit 1; fi
+
+    # install arduino component
+    ./tools/install-arduino.sh
+    if [ $? -ne 0 ]; then exit 1; fi
+
+    # install esp-idf
+    source ./tools/install-esp-idf.sh
+    if [ $? -ne 0 ]; then exit 1; fi
+fi
+`;
+const AR = '32709d56deb6030b2aa16a456a8c7c1c9e20a7e9';
+const TU = '93b53158f02bce9497419298ac27150eebe567d3';
+
+test('pinBuildSources force-checks-out both floating repos to their pinned commits', () => {
+  const out = pinBuildSources(BUILD_SH, { arduinoCommit: AR, tinyusbCommit: TU });
+  assert.match(out, new RegExp(`git -C components/arduino_tinyusb/tinyusb checkout ${TU}`));
+  assert.match(out, new RegExp(`git -C components/arduino checkout ${AR}`));
+});
+
+test('pinBuildSources injects AFTER install-arduino.sh, so the clones exist when checked out', () => {
+  const out = pinBuildSources(BUILD_SH, { arduinoCommit: AR, tinyusbCommit: TU });
+  assert.ok(out.indexOf('./tools/install-arduino.sh') < out.indexOf(`checkout ${AR}`));
+  // and before the esp-idf install step that follows
+  assert.ok(out.indexOf(`checkout ${AR}`) < out.indexOf('install-esp-idf.sh'));
+});
+
+test('pinBuildSources fails loud if the upstream anchor is gone rather than skip pinning', () => {
+  assert.throws(
+    () => pinBuildSources('echo no anchor here\n', { arduinoCommit: AR, tinyusbCommit: TU }),
+    /anchor not found/,
+  );
+});
+
+test('pinBuildSources fails loud on a missing commit rather than inject a bare checkout', () => {
+  assert.throws(() => pinBuildSources(BUILD_SH, { arduinoCommit: AR }), /tinyusbCommit is required/);
+  assert.throws(() => pinBuildSources(BUILD_SH, { tinyusbCommit: TU }), /arduinoCommit is required/);
 });
 
 // --- pinComponentVersions (ADR-0004): pin a floating managed-component version ----------------------
