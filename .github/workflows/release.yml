@@ -1,0 +1,127 @@
+# Thin-overlay build and release (ADR-0001 section 6 gate contract, slice-0002).
+#
+#   push to a branch touching the overlay -> build every enabled chip, fail whole on any, publish
+#     nothing (Scenario B, the build-only gate).
+#   push a v* tag -> build every chip, then publish the GitHub Release with the zip, its SHA-256,
+#     and the five-pin manifest (Scenarios A/C/D verified before publish).
+#
+# The enabled chip set is read from UPSTREAM.lock, never hardcoded here, so the lock stays the single
+# source of truth. The byte-for-byte reproducibility gate (ADR-0001 section 6) is tracked on the
+# LEDGER: it needs a prior-build store this first pipeline does not yet stand up.
+name: release
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'patches/**'
+      - 'sdkconfig/**'
+      - 'scripts/**'
+      - 'UPSTREAM.lock'
+      - '.github/workflows/release.yml'
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-22.04
+    outputs:
+      chips: ${{ steps.lock.outputs.chips }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: lock
+        name: Read enabled chips from UPSTREAM.lock
+        run: |
+          chips=$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync("./UPSTREAM.lock","utf8")).enabledChips))')
+          echo "chips=$chips" >> "$GITHUB_OUTPUT"
+          echo "enabled chips: $chips"
+
+  image:
+    needs: prep
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.build.outputs.tag }}
+      id: ${{ steps.build.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - id: build
+        name: Build the digest-pinned builder image
+        run: |
+          node scripts/build.mjs image --work work
+          echo "tag=$(node -e 'process.stdout.write(require("./work/image.json").tag)')" >> "$GITHUB_OUTPUT"
+          echo "id=$(node -e 'process.stdout.write(require("./work/image.json").id)')" >> "$GITHUB_OUTPUT"
+      - name: Save the image for the chip jobs
+        run: docker save "${{ steps.build.outputs.tag }}" | gzip > builder-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builder-image
+          path: builder-image.tar.gz
+          retention-days: 1
+
+  chips:
+    needs: [prep, image]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        chip: ${{ fromJSON(needs.prep.outputs.chips) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          name: builder-image
+      - name: Load the builder image
+        run: docker load < builder-image.tar.gz
+      - name: Build ${{ matrix.chip }}
+        run: node scripts/build.mjs chip --work work --image "${{ needs.image.outputs.tag }}" --chip "${{ matrix.chip }}" --dist dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chip-${{ matrix.chip }}
+          path: dist/*.tar.gz
+          retention-days: 1
+
+  package:
+    needs: [prep, image, chips]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chip-*
+          path: dist
+          merge-multiple: true
+      - name: Combine, package, and emit the five-pin manifest
+        # package mode fails if any enabled chip tar is missing (Scenario B: no partial release).
+        run: node scripts/build.mjs package --dist dist --out out --image-digest "${{ needs.image.outputs.id }}"
+      - name: Verify drop-in shape, manifest, and baseline (Scenarios A/C/D)
+        run: node scripts/0002-verify.mjs out/adv-esp32-arduino-libs-*.zip out/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            out/adv-esp32-arduino-libs-*.zip
+            out/adv-esp32-arduino-libs-*.zip.sha256
+            out/manifest.json
+      - name: Publish the GitHub Release (tag v* only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "Drop-in replacement for the Bruce precompiled blob (see README and manifest.json for provenance)." \
+            out/adv-esp32-arduino-libs-*.zip \
+            out/adv-esp32-arduino-libs-*.zip.sha256 \
+            out/manifest.json

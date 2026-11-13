@@ -1,0 +1,20 @@
+{
+  "comment": "Pins the thin-overlay build reads instead of a floating ref (ADR-0001 section 1). The build clones upstream at this exact commit, builds only the enabled chips, and records the resolved IDF/Arduino commits plus the builder image digest in each release manifest. Resolved IDF/Arduino commits are NOT pinned here: they are determined by the pinned builder tree and measured at build time (ADR-0001 section 1).",
+  "upstream": {
+    "repo": "espressif/esp32-arduino-lib-builder",
+    "ref": "idf-release_v5.5",
+    "commit": "e68e30112ffad75e96535408dfe25bff6d2f26fb"
+  },
+  "enabledChips": ["esp32", "esp32s3"],
+  "builderImage": {
+    "comment": "Option A (slice-0002): we build our own lean image from the pinned builder's Dockerfile, with its FROM base pinned by digest. Pin #5 (the built image ID, recorded per release in the manifest) ATTESTS the exact image a release was built in. It is not yet a from-scratch reconstruction input: the Dockerfile's apt and pip layers are not pinned, so a rebuild from the same Dockerfile and base digest yields a different ID. Freezing those layers for bit-reproducible images is part of the deferred reproducibility work (LEDGER). This is still stronger than a floating Docker Hub tag, which is why we build our own. scripts/build.mjs rewrites the single FROM line to baseDigest before docker build.",
+    "dockerfilePath": "tools/docker/Dockerfile",
+    "baseImage": "ubuntu:22.04",
+    "baseDigest": "sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c"
+  },
+  "referenceBlob": {
+    "comment": "The third-party precompiled blob both consumers pin today. Its measured top-level layout is the drop-in-parity reference for Scenario A, captured once by scripts/bruce-blob-shape-probe.mjs into reference/bruce-blob-layout.json.",
+    "url": "https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip",
+    "sizeBytes": 576678149
+  }
+}

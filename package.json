@@ -1,0 +1,15 @@
+{
+  "name": "esp32-arduino-adv-libs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Patched ESP-IDF + Arduino-core precompiled libs build for the adversary and esp32-wifi-sapper firmwares",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "node scripts/lint-docs.mjs .",
+    "index": "node scripts/build-index.mjs .",
+    "index:check": "node scripts/build-index.mjs --check .",
+    "verify:shape": "node scripts/0002-verify.mjs",
+    "probe:bruce-blob": "node scripts/bruce-blob-shape-probe.mjs"
+  }
+}
