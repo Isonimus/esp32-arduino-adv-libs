@@ -13,10 +13,11 @@
     "arduinoCommit": "9b3364c613c071a2e7322d49d467fd2166dbc70e",
     "tinyusbCommit": "93b53158f02bce9497419298ac27150eebe567d3"
   },
-  "managedComponentPinsComment": "Upstream declares its ML/camera/matter managed components as floating minimums in main/idf_component.yml, so the component manager resolves 'latest' at build time: unreproducible, and the reason esp-tflite-micro 1.4.3 (2026-11-10) broke the build by forcing -std=c++11 on its own C++17 code. We pin to the versions inside the 2025-12-05 reference blob (versions.txt): esp-tflite-micro 1.3.5 and esp_matter 1.4.1 (the version the pinned arduino commit's Matter library needs; its absence was the esp32 build failure). applyOverlay rewrites the matching version lines before build (ADR-0004). esp32-camera (git master) and esp-sr remain unpinned: tracked in LEDGER against ADR-0003.",
+  "removedComponentsComment": "Managed components the consumer firmwares (adversary, wifi-sapper) never use, removed from main/idf_component.yml so they are neither downloaded nor built (ADR-0006). esp_matter is removed because the stock espressif builder's config cannot build it: its OpenThread console (esp_matter_console_otcli.cpp) includes esp_openthread_types.h, available only when Thread is enabled, which it is not on esp32/esp32s3; the reference blob built it only because bruce's lib-builder fork (versions.txt: 'lib-builder: bruce b5b0771') carried a different config. Removing it also self-disables arduino-esp32's Matter library, whose sources are guarded by CONFIG_ESP_MATTER_ENABLE_DATA_MODEL (a symbol the esp_matter Kconfig defines). The rest of the unused stack (zigbee, the rainmaker cluster, esp-sr, esp-tflite-micro, esp32-camera) still builds and is deferred to a follow-up slimming (LEDGER), because that cluster is interdependent and removing it is a size optimization, not a build fix.",
+  "removedComponents": ["espressif/esp_matter"],
+  "managedComponentPinsComment": "Upstream declares its ML/camera managed components as floating minimums in main/idf_component.yml, so the component manager resolves 'latest' at build time: unreproducible, and the reason esp-tflite-micro 1.4.3 (2026-11-10) broke the build by forcing -std=c++11 on its own C++17 code. We pin esp-tflite-micro to 1.3.5, the version inside the 2025-12-05 reference blob (versions.txt). applyOverlay rewrites the matching version line before build, after the removals above (ADR-0004). esp32-camera (git master) and esp-sr remain unpinned: tracked in LEDGER. esp_matter is no longer pinned here: it is removed entirely (see removedComponents, ADR-0006).",
   "managedComponentPins": {
-    "espressif/esp-tflite-micro": "==1.3.5",
-    "espressif/esp_matter": "==1.4.1"
+    "espressif/esp-tflite-micro": "==1.3.5"
   },
   "enabledChips": ["esp32", "esp32s3"],
   "builderImage": {

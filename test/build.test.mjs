@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions, pinBuildSources } from '../scripts/build.mjs';
+import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand, pinComponentVersions, pinBuildSources, removeManagedComponents } from '../scripts/build.mjs';
 
 const BASE = 'ubuntu:22.04';
 const DIGEST = 'sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c';
@@ -226,5 +226,47 @@ test('pinComponentVersions fails loud when the component block has no version li
   assert.throws(
     () => pinComponentVersions(noVersion, { 'espressif/weird': '==1.0.0' }),
     /no "version:" line/,
+  );
+});
+
+// --- removeManagedComponents (ADR-0006): drop a managed component the consumers never use ----------
+
+// Mirrors the real builder main/idf_component.yml: esp_matter is the last block and carries a
+// nested rules: list, so removal must take the whole indented block through end-of-file.
+const MANIFEST_WITH_MATTER = `dependencies:
+  idf: ">=5.3"
+  espressif/esp-tflite-micro:
+    version: ">=1.2.0"
+    require: public
+    rules:
+      - if: "target not in [esp32c2]"
+  espressif/esp_matter:
+    version: "^1.3.0"
+    require: public
+    rules:
+      - if: "target not in [esp32c2, esp32h2, esp32p4]"
+`;
+
+test('removeManagedComponents drops the whole block, nested rules and all, leaving others intact', () => {
+  const out = removeManagedComponents(MANIFEST_WITH_MATTER, ['espressif/esp_matter']);
+  assert.ok(!out.includes('espressif/esp_matter'), 'the component key is gone');
+  assert.ok(!out.includes('esp32h2'), 'the nested rules line is gone too');
+  // The surviving component keeps its full block.
+  assert.match(out, /espressif\/esp-tflite-micro:\n {4}version: ">=1\.2\.0"\n {4}require: public\n {4}rules:\n {6}- if: "target not in \[esp32c2\]"/);
+  assert.match(out, /^ {2}idf: ">=5\.3"$/m);
+});
+
+test('removeManagedComponents removes a middle block without eating the next component', () => {
+  const out = removeManagedComponents(MANIFEST_WITH_MATTER, ['espressif/esp-tflite-micro']);
+  assert.ok(!out.includes('espressif/esp-tflite-micro'));
+  assert.ok(!out.includes('esp32c2]"\n'), 'tflite rules line gone');
+  // esp_matter (the block after the removed one) survives whole.
+  assert.match(out, /espressif\/esp_matter:\n {4}version: "\^1\.3\.0"\n {4}require: public/);
+});
+
+test('removeManagedComponents fails loud on an absent component rather than silently no-op', () => {
+  assert.throws(
+    () => removeManagedComponents(MANIFEST_WITH_MATTER, ['espressif/not-here']),
+    /not found in manifest/,
   );
 });

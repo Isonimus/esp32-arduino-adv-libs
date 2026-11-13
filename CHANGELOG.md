@@ -47,6 +47,17 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   own downstream-fork wrapper SHA, which is byte-identical in source but unreachable
   from any espressif ref (ADR-0005, incl. its 2026-11-13 amendment). This supersedes
   ADR-0003's float-the-branch choice.
+- **Unused managed components removed, starting with esp_matter (ADR-0006).** With the source
+  pins fixed, the build reached a deep compile failure on both chips: `esp_matter`'s OpenThread
+  console (`esp_matter_console_otcli.cpp`) needs a Thread config that is off on esp32/esp32s3. The
+  reference blob built it only because it used bruce's lib-builder fork config, not espressif's
+  stock one. The consumer firmwares use no Matter/Thread/Zigbee/ML APIs, so rather than adopt
+  Bruce's config, the overlay now removes components the consumers never use from the builder's
+  `main/idf_component.yml` (`removedComponents` in `UPSTREAM.lock`, applied by
+  `removeManagedComponents`). Removing `esp_matter` also self-disables arduino-esp32's Matter
+  library, which is guarded by `CONFIG_ESP_MATTER_ENABLE_DATA_MODEL`. `esp_matter` is no longer in
+  `managedComponentPins`. The rest of the unused stack still builds and is tracked for a follow-up
+  slimming in the ledger.
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing

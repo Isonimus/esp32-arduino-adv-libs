@@ -144,7 +144,7 @@ export function pinBuildSources(buildShText, { arduinoCommit, tinyusbCommit }) {
 
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
-  const { upstream, enabledChips, managedComponentPins, sourcePins } = lock();
+  const { upstream, enabledChips, managedComponentPins, sourcePins, removedComponents } = lock();
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
@@ -155,7 +155,7 @@ function cmdChip(args) {
     throw new Error('UPSTREAM.lock sourcePins.idfCommit is required (pin the IDF commit, not the floating branch head; see ADR-0005)');
   }
   const builderDir = cloneUpstream(args.work, upstream);
-  applyOverlay(builderDir, managedComponentPins, sourcePins);
+  applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents);
 
   // Build inside our image; override the entrypoint so we run build.sh directly. The container
   // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
@@ -213,13 +213,47 @@ export function pinComponentVersions(manifestText, pins) {
   return lines.join('\n');
 }
 
+/**
+ * Remove named managed components, with their full indented block, from an idf_component.yml.
+ * The upstream builder declares a Matter/Thread/Zigbee/ML stack the consumer firmwares never use
+ * (ADR-0006); a component left in the manifest is downloaded and built, and the stock espressif
+ * builder's config for esp_matter cannot build (its OpenThread console needs a Thread config that
+ * is off on esp32/esp32s3). Removing esp_matter from the manifest both stops it building and makes
+ * arduino-esp32's Matter library self-disable: its sources are guarded by
+ * `#ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL`, a symbol the esp_matter Kconfig defines, so without
+ * the component the guard is false and the sources compile to nothing. Pure: takes and returns
+ * text. Fails loud if a named component is absent, so a stale removal cannot silently no-op.
+ */
+export function removeManagedComponents(manifestText, names) {
+  const lines = manifestText.split('\n');
+  for (const component of names) {
+    const escaped = component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keyRe = new RegExp(`^(\\s+)${escaped}:\\s*$`);
+    let keyIdx = -1;
+    let keyIndent = '';
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(keyRe);
+      if (m) { keyIdx = i; keyIndent = m[1]; break; }
+    }
+    if (keyIdx === -1) throw new Error(`removeManagedComponents: component "${component}" not found in manifest`);
+    let end = keyIdx + 1; // first line past this component's block
+    for (; end < lines.length; end++) {
+      if (lines[end].trim() === '') continue; // blank lines belong to the block until a shallower key
+      const indent = lines[end].match(/^(\s*)/)[1];
+      if (indent.length <= keyIndent.length) break;
+    }
+    lines.splice(keyIdx, end - keyIdx);
+  }
+  return lines.join('\n');
+}
+
 // Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, managed-component
-// version pins, then floating-source commit pins. All are optional; the loops exist so the empty
-// baseline and the later patched releases share one code path. Component pins (managedComponentPins)
-// rewrite main/idf_component.yml; source pins (sourcePins.arduinoCommit/tinyusbCommit) inject
-// force-checkouts into build.sh. Both are build config applied as overlay rewrites, not numbered
-// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005).
-function applyOverlay(builderDir, managedComponentPins, sourcePins) {
+// removals, version pins, then floating-source commit pins. All are optional; the loops exist so the
+// empty baseline and the later patched releases share one code path. Removals and pins (removedComponents,
+// managedComponentPins) rewrite main/idf_component.yml; source pins (sourcePins.arduinoCommit/tinyusbCommit)
+// inject force-checkouts into build.sh. All are build config applied as overlay rewrites, not numbered
+// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005, ADR-0006).
+function applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents) {
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
     run('git', ['-C', builderDir, 'apply', '--verbose', join(PATCHES_DIR, f)]);
@@ -229,9 +263,13 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins) {
       cpSync(join(SDKCONFIG_DIR, f), join(builderDir, 'configs', f));
     }
   }
+  const manifestPath = join(builderDir, 'main', 'idf_component.yml');
+  const removals = removedComponents ?? [];
+  if (removals.length) {
+    writeFileSync(manifestPath, removeManagedComponents(readFileSync(manifestPath, 'utf8'), removals));
+  }
   const pins = managedComponentPins ?? {};
   if (Object.keys(pins).length) {
-    const manifestPath = join(builderDir, 'main', 'idf_component.yml');
     writeFileSync(manifestPath, pinComponentVersions(readFileSync(manifestPath, 'utf8'), pins));
   }
   if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) {
@@ -239,10 +277,11 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins) {
     writeFileSync(buildShPath, pinBuildSources(readFileSync(buildShPath, 'utf8'), sourcePins));
   }
   const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
+  const removeSummary = removals.join(', ') || 'none';
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, removed components ${removeSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---
