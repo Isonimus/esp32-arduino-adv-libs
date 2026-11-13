@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a defect in the build or release pipeline
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For a security-sensitive issue in the build or release pipeline, use
+        SECURITY.md (private reporting) instead of a public bug report. For a bug
+        in the consuming firmware, open it in that firmware's own repository.
+  - type: input
+    id: version
+    attributes:
+      label: Release tag or commit
+      placeholder: "v0.0.1, or the commit SHA you built"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Build orchestration (scripts/build.mjs)
+        - Shape / provenance verify (scripts/0002-verify.mjs)
+        - CI workflow (release.yml / ci.yml)
+        - Pins (UPSTREAM.lock) or manifest
+        - Doc method / linter
+        - Consuming a release (platformio.ini swap)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / logs (optional)
+      description: "Relevant command output or CI job log around the failure."
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment, if relevant
+      placeholder: "e.g. Node 20.11, Docker 27.0, ubuntu-22.04 runner"

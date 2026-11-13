@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # GitHub Actions is the only ecosystem Dependabot can track here. This repo has no
+  # npm dependencies (the scripts are plain zero-dependency Node), so there is no
+  # package-lock for Dependabot to update. The Docker base is pinned by digest in
+  # UPSTREAM.lock and consumed from the upstream Dockerfile at build time, not from a
+  # Dockerfile in this repo, so a docker ecosystem block would have nothing to update.
+  # Both are deliberately omitted rather than shipped as dead config.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

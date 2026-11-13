@@ -1,0 +1,34 @@
+name: CI
+
+# Fast first-party checks on every change: the doc linter, the generated-index match,
+# and the node:test suite for the build helpers. This is the lightweight gate; the heavy
+# multi-hour Docker build lives in release.yml and runs only on overlay changes and tags.
+on:
+  push:
+  pull_request:
+
+# Only the latest push to a given ref is worth checking; cancel superseded runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No `npm ci`: this repo has zero npm dependencies, so there is no lockfile to
+      # install. The scripts below are plain Node and run as-is.
+      - name: Lint docs (stele method)
+        run: npm run lint
+
+      - name: Check generated index matches the corpus
+        run: npm run index:check
+
+      - name: Test build helpers
+        run: npm test

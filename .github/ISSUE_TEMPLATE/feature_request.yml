@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a change to the build, the pins, or the release shape
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A new patch in the stack is driven by a consumer ADR, not requested here.
+        Use this for pipeline, pin, chip-set, or release-shape changes.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      multiple: true
+      options:
+        - A new enabled chip (beyond esp32 / esp32s3)
+        - Upstream pin bump (UPSTREAM.lock)
+        - Build / orchestration (scripts)
+        - CI / release workflow
+        - Provenance / reproducibility
+        - Release shape or packaging
+        - Not pipeline-specific

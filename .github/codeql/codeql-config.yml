@@ -1,0 +1,9 @@
+name: "CodeQL config"
+
+# JavaScript/TypeScript is an interpreted language for CodeQL, so unlike the compiled
+# case, `paths` / `paths-ignore` ARE respected: analysis is scoped to our own first-party
+# scripts and tests. We own every .mjs here (there are no vendored JS dependencies), so no
+# post-analysis result filtering is needed, only this scope.
+paths:
+  - scripts
+  - test

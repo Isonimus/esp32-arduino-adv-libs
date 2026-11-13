@@ -1,8 +1,18 @@
 # esp32-arduino-adv-libs
 
+<p>
+  <a href="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/ci.yml"><img src="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/codeql.yml"><img src="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/release.yml"><img src="https://github.com/Isonimus/esp32-arduino-adv-libs/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/ESP--IDF-v5.5-informational" alt="ESP-IDF v5.5">
+  <img src="https://img.shields.io/badge/chips-esp32%20%7C%20esp32s3-6aa84f" alt="Chips: esp32, esp32s3">
+  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: alpha">
+</p>
+
 A patched ESP-IDF + Arduino-core precompiled libraries build. It publishes release artifacts
 shaped exactly like `framework-arduinoespressif32-libs`, so the two sibling pentest firmwares
-(`adversary` and `esp32-wifi-sapper`) can retire the third-party precompiled blob they pull today
+([`adversary`](https://github.com/Isonimus/adversary) and [`esp32-wifi-sapper`](https://github.com/Isonimus/wifi-sapper)) can retire the third-party precompiled blob they pull today
 and pull ours instead, with a one-line `platformio.ini` change.
 
 The *why* (owning the build, fork model, tracking policy, patch conventions, release shape) lives in
@@ -77,3 +87,14 @@ touching the overlay builds every chip and fails whole on any chip failing, but 
   drop-in-parity reference. Regenerate with `npm run probe:bruce-blob`.
 - [`patches/`](patches): the ordered patch stack (empty at `v0.0.1`). Each patch is one concern and
   cites the consumer ADR that demands it.
+
+## License
+
+This repository's own code and documents (the overlay: build orchestration, the doc method, the
+scripts) are licensed under the [MIT License](LICENSE).
+
+The **released libraries are a different matter.** They are built from upstream sources and carry those
+upstream terms, not this repo's MIT: ESP-IDF is Apache-2.0, and the Arduino ESP32 core is LGPL-2.1.
+A release artifact bundles their compiled output, so your use of a release is governed by those upstream
+licenses. This repo's MIT covers the thin overlay that drives the build, not the toolchains it builds
+from. See the [DISCLAIMER](DISCLAIMER.md) for intended-use terms.
