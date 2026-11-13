@@ -78,6 +78,15 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   `91214b46` (tinyusb master at the builder's own commit date), what the stock builder would
   itself have cloned. This refines ADR-0005's tinyusb value (a source pin's anchor is the
   stock builder's era, not the blob's); the IDF and arduino pins already matched the builder.
+- **Manifest parser fixed to the builder's real `versions.txt` format.** With both chips
+  green for the first time (run `43517943974`), the `package` step failed resolving the
+  provenance commits: `could not resolve idf/arduino commits from esp32 versions.txt`. The
+  stock builder writes one short commit per line (`esp-idf: 8410210c9a0`), but
+  `parseVersionsText` assumed a two-token `<name>: <branch> <sha>` line and captured the
+  second token, so it matched nothing. The regex (and its test fixtures, previously green
+  against an invented format) now match a hex SHA immediately after the label, failing loud
+  on any other shape so a branch name can never be recorded as a provenance commit. The whole
+  `package` + Scenario A/C/D verify was replayed locally against the real chip artifacts.
 - **Managed-component versions pinned (ADR-0004).** Upstream declares
   `esp-tflite-micro` (and camera/sr/matter) as floating minimums, so the component
   manager resolved a newer `esp-tflite-micro` that broke the build by forcing

@@ -44,19 +44,31 @@ test('pinDockerfileFrom refuses two matching FROM lines (ambiguous base)', () =>
 
 // --- parseVersionsText -----------------------------------------------------------------------------
 
-const VALID_VERSIONS = 'esp-idf: release/v5.5 8410210c9a\narduino: master 32709d56d\n';
+// Real stock-builder (e68e301) format: "<name>: <short-sha>", one token after the label, with
+// lib-builder/tinyusb/component lines interleaved that the parser must ignore. Captured from the
+// first green run's chip artifact (run 43517943974).
+const VALID_VERSIONS = 'lib-builder: e68e301\nesp-idf: 8410210c9a0\narduino: 9b3364c61\ntinyusb: 91214b461\nespressif__mdns: 1.15.1\n';
 
 test('parseVersionsText extracts the resolved idf and arduino commits', () => {
   assert.deepEqual(parseVersionsText(VALID_VERSIONS, 'esp32'), {
-    idf: '8410210c9a',
-    arduino: '32709d56d',
+    idf: '8410210c9a0',
+    arduino: '9b3364c61',
   });
 });
 
 test('parseVersionsText fails loud when a commit line is missing', () => {
   assert.throws(
-    () => parseVersionsText('esp-idf: release/v5.5 8410210c9a\n', 'esp32'),
+    () => parseVersionsText('esp-idf: 8410210c9a0\n', 'esp32'),
     /could not resolve idf\/arduino commits from esp32/,
+  );
+});
+
+test('parseVersionsText fails loud rather than recording a branch token as a commit', () => {
+  // A hypothetical "<name>: <branch> <sha>" line must not silently resolve to the branch: the hex
+  // guard rejects "release/v5.5", so no idf is captured and the fail-loud throw fires (invariant 5).
+  assert.throws(
+    () => parseVersionsText('esp-idf: release/v5.5 8410210c9a0\narduino: 9b3364c61\n', 'esp32'),
+    /could not resolve idf\/arduino commits from esp32 versions\.txt \(idf="", arduino="9b3364c61"\)/,
   );
 });
 
@@ -70,10 +82,10 @@ test('reconcileVersions returns the shared commits and writes the unioned file w
   const out = tempOut();
   try {
     const resolved = reconcileVersions(out, {
-      esp32: 'esp-idf: release/v5.5 8410210c9a\narduino: master 32709d56d\n',
-      esp32s3: 'esp-idf: release/v5.5 8410210c9a\narduino: master 32709d56d\nextra: s3-only line\n',
+      esp32: 'esp-idf: 8410210c9a0\narduino: 9b3364c61\n',
+      esp32s3: 'esp-idf: 8410210c9a0\narduino: 9b3364c61\nextra: s3-only line\n',
     });
-    assert.deepEqual(resolved, { idf: '8410210c9a', arduino: '32709d56d' });
+    assert.deepEqual(resolved, { idf: '8410210c9a0', arduino: '9b3364c61' });
     const written = readFileSync(out, 'utf8');
     assert.ok(written.includes('extra: s3-only line'), 'union must keep a chip-unique line');
   } finally {
@@ -86,8 +98,8 @@ test('reconcileVersions fails loud when two chips disagree on resolved sources',
   try {
     assert.throws(
       () => reconcileVersions(out, {
-        esp32: 'esp-idf: release/v5.5 8410210c9a\narduino: master 32709d56d\n',
-        esp32s3: 'esp-idf: release/v5.5 DEADBEEF99\narduino: master 32709d56d\n',
+        esp32: 'esp-idf: 8410210c9a0\narduino: 9b3364c61\n',
+        esp32s3: 'esp-idf: deadbeef990\narduino: 9b3364c61\n',
       }),
       /chips disagree on resolved sources/,
     );

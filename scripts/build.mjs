@@ -431,8 +431,12 @@ export function reconcileVersions(outPath, perChipVersions) {
 
 export function parseVersionsText(text, chip) {
   const out = { idf: '', arduino: '' };
+  // The stock builder writes one short commit per line, "<name>: <sha>" (e.g. "esp-idf: 8410210c9a0",
+  // measured from e68e301's own versions.txt), not "<name>: <branch> <sha>". Match a hex SHA
+  // immediately after the label so a format carrying an unexpected extra token fails loud here
+  // (invariant 5) instead of silently recording a branch name as a provenance commit.
   for (const line of text.split('\n')) {
-    const m = line.match(/^(esp-idf|arduino):\s+\S+\s+(\S+)/);
+    const m = line.match(/^(esp-idf|arduino):\s+([0-9a-f]{7,40})\b/);
     if (!m) continue;
     if (m[1] === 'esp-idf') out.idf = m[2];
     else out.arduino = m[2];
