@@ -26,6 +26,9 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
 - **Repo infrastructure added.** License, code of conduct, contributing and
   security policies, issue and PR templates, Dependabot, a lint/test CI workflow,
   and CodeQL scanning.
+- **ADR-index cell escaping hardened.** `scripts/build-index.mjs` now escapes the
+  backslash before the pipe, so a title carrying either character cannot corrupt
+  the generated table (CWE-116, first CodeQL finding); covered by a regression test.
 
 The CI build and the `v0.0.1` tag are intentionally unproven at bootstrap:
 standing invariants 4 and 5 stay pending in `LEDGER.md` until a tagged build is
