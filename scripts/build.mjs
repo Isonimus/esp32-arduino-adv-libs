@@ -100,31 +100,42 @@ function cloneUpstream(work, upstream) {
 }
 
 // --- chip: build one chip inside the image and export its tar ---
+// The in-container bash command for a chip build. The IDF branch is passed explicitly: the
+// upstream builder's tools/config.sh defaults IDF_BRANCH to release/v5.3, so a build.sh with
+// no -I silently builds the wrong IDF (ADR-0003). safe.directory comes first: the clone is
+// owned by the runner user but the container runs as root, so without it git rejects
+// /workspace as "dubious ownership" and every rev-parse the lib-builder runs for version
+// detection fails (which then breaks patch application and CMake source resolution); '*'
+// also covers IDF's nested submodule worktrees. -e archives the per-chip result to dist/.
+export function chipBuildCommand(chip, idfBranch) {
+  if (!chip) throw new Error('chipBuildCommand: chip is required');
+  if (!idfBranch) throw new Error('chipBuildCommand: idfBranch is required');
+  return `git config --global --add safe.directory '*' && ./build.sh -e -I ${idfBranch} -t ${chip}`;
+}
+
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
   const { upstream, enabledChips } = lock();
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
+  if (!upstream.idfBranch) {
+    throw new Error('UPSTREAM.lock upstream.idfBranch is required (the builder defaults to release/v5.3; see ADR-0003)');
+  }
   const builderDir = cloneUpstream(args.work, upstream);
   applyOverlay(builderDir);
 
-  // Build inside our image; override the entrypoint so we run build.sh directly. -e archives the
-  // per-chip result to dist/ (upstream tools/archive-build.sh). The container runs as root, so it
-  // writes root-owned files into the mounted clone: fine on an ephemeral CI runner, but a LOCAL
-  // re-run's cloneUpstream() rmSync of work/builder can hit EACCES and fail loud. Locally, build in
-  // a throwaway --work dir (or sudo-remove it) rather than relying on cleanup.
+  // Build inside our image; override the entrypoint so we run build.sh directly. The container
+  // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
+  // runner, but a LOCAL re-run's cloneUpstream() rmSync of work/builder can hit EACCES and fail
+  // loud. Locally, build in a throwaway --work dir (or sudo-remove it) rather than relying on cleanup.
   run('docker', [
     'run', '--rm',
     // Absolute path required: docker reads a relative source as a named volume, not a bind mount.
     '-v', `${resolve(builderDir)}:/workspace`, '-w', '/workspace',
     '-e', 'IDF_COMPONENT_OVERWRITE_MANAGED_COMPONENTS=1',
     '--entrypoint', 'bash',
-    // The clone is owned by the runner user but the container runs as root, so git rejects
-    // /workspace as "dubious ownership" and every rev-parse the lib-builder runs for version
-    // detection fails (which then breaks patch application and CMake source resolution). Mark
-    // the mounted tree trusted before building. '*' covers IDF's nested submodule worktrees too.
-    args.image, '-c', `git config --global --add safe.directory '*' && ./build.sh -e -t ${args.chip}`,
+    args.image, '-c', chipBuildCommand(args.chip, upstream.idfBranch),
   ]);
 
   const tars = readdirSync(join(builderDir, 'dist')).filter((f) => f.startsWith(`arduino-esp32-libs-${args.chip}-`) && f.endsWith('.tar.gz'));

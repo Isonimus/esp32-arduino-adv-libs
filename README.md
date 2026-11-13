@@ -80,8 +80,11 @@ touching the overlay builds every chip and fails whole on any chip failing, but 
 
 ## What is pinned where
 
-- [`UPSTREAM.lock`](UPSTREAM.lock): the upstream builder commit, the enabled chip set, the builder
-  image base digest, and the reference blob the drop-in check compares against.
+- [`UPSTREAM.lock`](UPSTREAM.lock): the upstream builder commit, the ESP-IDF branch to build
+  (`idfBranch`, passed to `build.sh -I`: the builder defaults to 5.3, so 5.5 is opt-in, see
+  [`adr/0003-explicit-idf-branch-selection.md`](adr/0003-explicit-idf-branch-selection.md)), the
+  enabled chip set, the builder image base digest, and the reference blob the drop-in check
+  compares against.
 - [`reference/bruce-blob-layout.json`](reference/bruce-blob-layout.json): the measured layout of the
   blob the consumers pin today, captured once by `scripts/bruce-blob-shape-probe.mjs` and used as the
   drop-in-parity reference. Regenerate with `npm run probe:bruce-blob`.

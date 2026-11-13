@@ -1,9 +1,11 @@
 {
-  "comment": "Pins the thin-overlay build reads instead of a floating ref (ADR-0001 section 1). The build clones upstream at this exact commit, builds only the enabled chips, and records the resolved IDF/Arduino commits plus the builder image digest in each release manifest. Resolved IDF/Arduino commits are NOT pinned here: they are determined by the pinned builder tree and measured at build time (ADR-0001 section 1).",
+  "comment": "Pins the thin-overlay build reads instead of a floating ref (ADR-0001 section 1). The build clones upstream at this exact commit, builds only the enabled chips, and records the resolved IDF/Arduino commits plus the builder image digest in each release manifest. The resolved IDF/Arduino commits are NOT pinned here: they are determined by the pinned builder tree plus idfBranch, and measured at build time (ADR-0001 section 1, ADR-0003).",
   "upstream": {
     "repo": "espressif/esp32-arduino-lib-builder",
     "ref": "idf-release_v5.5",
-    "commit": "e68e30112ffad75e96535408dfe25bff6d2f26fb"
+    "commit": "e68e30112ffad75e96535408dfe25bff6d2f26fb",
+    "idfBranchComment": "Passed to build.sh -I. The builder commit does NOT uniquely determine the IDF version: its tools/config.sh defaults IDF_BRANCH to release/v5.3, so without this the build silently produces 5.3, not the 5.5 the consumers need (ADR-0003). The branch head floats; the resolved commit is measured into each manifest.",
+    "idfBranch": "release/v5.5"
   },
   "enabledChips": ["esp32", "esp32s3"],
   "builderImage": {

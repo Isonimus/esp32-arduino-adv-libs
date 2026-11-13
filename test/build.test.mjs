@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pinDockerfileFrom, parseVersionsText, reconcileVersions } from '../scripts/build.mjs';
+import { pinDockerfileFrom, parseVersionsText, reconcileVersions, chipBuildCommand } from '../scripts/build.mjs';
 
 const BASE = 'ubuntu:22.04';
 const DIGEST = 'sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c';
@@ -94,4 +94,27 @@ test('reconcileVersions fails loud when two chips disagree on resolved sources',
   } finally {
     rmSync(join(out, '..'), { recursive: true, force: true });
   }
+});
+
+// --- chipBuildCommand (ADR-0003): the IDF branch must be selected explicitly ------------------------
+
+test('chipBuildCommand passes -I <idfBranch> so the build does not fall back to the builder default', () => {
+  // The upstream config.sh defaults IDF_BRANCH to release/v5.3; dropping -I silently builds 5.3.
+  const cmd = chipBuildCommand('esp32', 'release/v5.5');
+  assert.match(cmd, /\.\/build\.sh .*-I release\/v5\.5\b/);
+  assert.match(cmd, /-t esp32\b/);
+});
+
+test('chipBuildCommand marks the mounted tree safe before invoking build.sh', () => {
+  const cmd = chipBuildCommand('esp32s3', 'release/v5.5');
+  assert.match(cmd, /^git config --global --add safe\.directory '\*' && \.\/build\.sh/);
+});
+
+test('chipBuildCommand refuses a missing idfBranch rather than build the wrong IDF', () => {
+  assert.throws(() => chipBuildCommand('esp32', ''), /idfBranch is required/);
+  assert.throws(() => chipBuildCommand('esp32', undefined), /idfBranch is required/);
+});
+
+test('chipBuildCommand refuses a missing chip', () => {
+  assert.throws(() => chipBuildCommand('', 'release/v5.5'), /chip is required/);
 });
