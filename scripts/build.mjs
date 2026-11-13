@@ -120,7 +120,11 @@ function cmdChip(args) {
     '-v', `${resolve(builderDir)}:/workspace`, '-w', '/workspace',
     '-e', 'IDF_COMPONENT_OVERWRITE_MANAGED_COMPONENTS=1',
     '--entrypoint', 'bash',
-    args.image, '-c', `./build.sh -e -t ${args.chip}`,
+    // The clone is owned by the runner user but the container runs as root, so git rejects
+    // /workspace as "dubious ownership" and every rev-parse the lib-builder runs for version
+    // detection fails (which then breaks patch application and CMake source resolution). Mark
+    // the mounted tree trusted before building. '*' covers IDF's nested submodule worktrees too.
+    args.image, '-c', `git config --global --add safe.directory '*' && ./build.sh -e -t ${args.chip}`,
   ]);
 
   const tars = readdirSync(join(builderDir, 'dist')).filter((f) => f.startsWith(`arduino-esp32-libs-${args.chip}-`) && f.endsWith('.tar.gz'));
