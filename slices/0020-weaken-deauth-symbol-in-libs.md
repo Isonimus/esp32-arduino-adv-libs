@@ -152,3 +152,24 @@ first build's failure.
 Scenario 4 (the `adversary` consumer-link re-trial with its `weaken_deauth` hook disabled) is the only
 one outstanding; it is recorded in a further amendment below once the firmware is built and the board
 flashed.
+
+## Amendment: 2026-11-14 Consumer-link re-trial confirms DoD scenario 4
+
+The esp32s3 libs from CI run `43648597057` were consumed by the `adversary` firmware with its
+`weaken_deauth` pre-build hook **disabled** (so the test proves the shipped libs are weak by
+construction, not weakened by the hook) and its `platformio.ini` `framework-arduinoespressif32-libs`
+pinned to the built zip (`file://`), the cached libs cleared first.
+
+- Scenario 4 (link): met. `pio run -e cardputer` linked green (`[SUCCESS]`, RAM 25.3%, Flash 75.9% of the
+  consumer's 3.34MB app partition), with no multiple-definition error on
+  `ieee80211_raw_frame_sanity_check` and the hook confirmed not run. `deauth.cpp`'s strong override links
+  because the shipped `libnet80211.a` already carries the symbol weak.
+- No regression on hardware: the built image flashed to a PSRAM-less StampS3 Cardputer over
+  `/dev/ttyACM0` (hash verified) and booted clean: the `THE ADVERSARY` banner, M5GFX autodetect
+  `board_M5CardputerADV`, canvas `Internal: 214200, PSRAM: 0`, `Reset reason: USB (crash count: 0)`, SD
+  mounted (SDHC, 292 handshakes), and `Initialization complete. Entering main loop.`; no `abort`, no boot
+  loop (the absent WS1850S RFID module logs unrelated I2C errors).
+
+All four Definition-of-Done scenarios are now met. The `adversary` `platformio.ini` edits were temporary
+and reverted. The consumers retire their `weaken_deauth` hook on the release carrying this patch (their
+`ADR-0027` / `ADR-0029`).
