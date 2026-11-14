@@ -29,13 +29,16 @@ platform_packages =
     ; before: the third-party Bruce blob
     ; framework-arduinoespressif32-libs @ https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip
     ; after: a release of this repo
-    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.0.1/adv-esp32-arduino-libs-v5.5-20261113-e68e301.zip
+    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.0.2/adv-esp32-arduino-libs-v5.5-20261114-e68e301.zip
 ```
 
 The zip's internal layout is a drop-in: the per-chip directories (`esp32/`, `esp32s3/`) sit at the
 zip root alongside `package.json`, `tools.json`, and `versions.txt`, which is the shape PlatformIO
-expects of the `framework-arduinoespressif32-libs` package. The `v0.0.1` release is an **unmodified**
-build (no patches); later releases add one patch each, every patch tracing to a consumer ADR.
+expects of the `framework-arduinoespressif32-libs` package. `v0.0.2` is the current drop-in: an
+overlay build (no numbered patches yet) carrying the component slim and the two sdkconfig fixes that
+make it link on esp32 and boot on a PSRAM-less esp32s3. The earlier `v0.0.1` is the **unmodified**
+baseline and is not a working drop-in (it overflows esp32 IRAM and boot-loops a PSRAM-less esp32s3).
+Later releases add one numbered patch each, every patch tracing to a consumer ADR.
 
 ## Provenance
 

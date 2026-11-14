@@ -8,6 +8,19 @@ changelog.
 
 ## Unreleased
 
+---
+
+## v0.0.2 (2026-11-14)
+
+Drop-in parity release: the overlay now matches the Bruce precompiled blob closely enough for the two
+consumer firmwares (`adversary`, `esp32-wifi-sapper`) to retire it with a one-line `platformio.ini` URL
+swap on both chips. Two measured sdkconfig fixes (esp32 IRAM overflow, esp32s3 PSRAM-less boot loop),
+the unused-component slim, and the source-pin reachability preflight, built and published for `esp32`
+and `esp32s3` (release run `43635635877`, tag `v0.0.2`, asset
+`adv-esp32-arduino-libs-v5.5-20261114-e68e301.zip`). Hardware-proven: the adversary `m5stick` links
+clean (esp32), a PSRAM-less StampS3 Cardputer boots to the UI (esp32s3), and the USB-HID mouse jiggler
+works.
+
 - **Fixed the esp32s3 boot loop on PSRAM-less boards.** A `v0.0.1` hardware test boot-looped a StampS3
   Cardputer (no PSRAM): our esp32s3 quad/qspi libs enable `CONFIG_SPIRAM_BOOT_HW_INIT`, so the
   boot-time PSRAM hardware init aborts when no chip is present. IDF 5.5 split that symbol out of
