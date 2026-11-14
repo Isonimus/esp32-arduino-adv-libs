@@ -158,3 +158,19 @@ consistent with repo convention:
 - Rejected: the reviewer flagged `status: accepted` before `## As built` is filled. This is the
   established pattern (slice-0014, slice-0016 accept at write and fill As built by amendment after CI and
   hardware); the CI-build and Cardputer scenarios are recorded in a further amendment below at merge.
+
+## Amendment: 2026-11-14 First CI build: both chips green, 0012-verify caught a second esp-sr declaration
+
+The first build-only CI run (`43639756038`, `workflow_dispatch` on `feat/remove-esp-sr`, publish
+correctly skipped by the `refs/tags/v*` gate) built both chips green (DoD scenario 1 met: removing
+esp-sr broke neither build, and the esp32s3 `srmodels_bin` step removal held) but failed the `package`
+job at `scripts/0012-verify.mjs`: `esp32s3: removed component(s) still resolved: espressif/esp-sr`.
+
+Root cause: esp-sr is declared in **both** the builder's `main/idf_component.yml` and arduino-esp32's
+own `idf_component.yml` (rule `target in [esp32s3, esp32p4]`); this slice first removed it only from
+`main`, so arduino's declaration still pulled it into the esp32s3 `dependencies.lock`. The
+dependency-tree check (invariant 7) caught it before merge, which is its purpose. Fixed by also adding
+`espressif/esp-sr` to `removedArduinoComponents` (in-container strip, ADR-0011 mechanism); the `ESP_SR`
+arduino library self-disables via `CONFIG_MODEL_IN_FLASH` / `CONFIG_MODEL_IN_SDCARD`, esp-sr Kconfig
+symbols that go undeclared with the component gone. Recorded in ADR-0017's amendment. A second CI build
+confirms the fix in a further amendment below.

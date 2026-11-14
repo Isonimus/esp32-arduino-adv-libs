@@ -9,7 +9,9 @@ changelog.
 ## Unreleased
 
 - **Removed `esp-sr`, the last unused component.** The two consumer firmwares link no speech-recognition
-  API, so the overlay now drops `espressif/esp-sr` from the builder's `main/idf_component.yml`, the
+  API, so the overlay now drops `espressif/esp-sr` from both manifests that declare it (the builder's
+  `main/idf_component.yml` host-side and arduino-esp32's own manifest in-container; its `ESP_SR` library
+  self-disables via the esp-sr Kconfig symbols its guard reads), the
   `esp_sr` feature from the esp32s3 target in `configs/builds.json` (new `removedBuildFeatures` lock
   field and the `removeBuildFeatures` overlay helper), and esp-sr's dedicated `idf.py srmodels_bin` step
   from `build.sh` (`stripEspSrModelStep`): that step's target is registered by esp-sr's CMake, so keeping

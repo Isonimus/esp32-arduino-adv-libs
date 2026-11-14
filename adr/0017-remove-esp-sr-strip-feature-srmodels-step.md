@@ -116,3 +116,26 @@ components ADR-0011 removes in-container.
   features (host-side), alongside `removedComponents` (builder `main` manifest) and
   `removedArduinoComponents` (arduino's own manifest, in-container). A future feature removal uses it;
   a build step bound to a removed feature is stripped by a dedicated anchored rewrite as `esp_sr`'s is.
+
+## Amendment: 2026-11-14 esp-sr is also declared in arduino-esp32's manifest, remove it there too
+
+The context above states esp-sr is declared in the builder's `main/idf_component.yml`. That is true but
+incomplete: esp-sr is declared in **both** manifests. arduino-esp32's own `idf_component.yml` (at the
+pinned `arduinoCommit` `9b3364c6`) also declares `espressif/esp-sr` (`version: "^2.1.5"`, rule
+`target in [esp32s3, esp32p4]`). The first survey for this ADR missed the arduino declaration.
+
+The consequence was caught by the dependency-tree check before merge, which is what it is for: the
+first build-only CI run (`43639756038`) built both chips green but failed `scripts/0012-verify.mjs` with
+`esp32s3: removed component(s) still resolved: espressif/esp-sr`. Removing esp-sr from `main` alone left
+arduino's declaration pulling it back into the esp32s3 `dependencies.lock`.
+
+Correction: esp-sr is removed from **both** manifests. `removedComponents` removes it from the builder's
+`main` (host-side, this ADR's original decision); `removedArduinoComponents` now also removes it from
+arduino's own manifest in-container, via the same `strip-manifest-components.py` mechanism ADR-0011 uses
+for the Zigbee and RainMaker components. This is compile-safe for the same reason as ADR-0011's
+removals: arduino's only esp-sr consumer, the `ESP_SR` library, is guarded by
+`#if (CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4) && (CONFIG_MODEL_IN_FLASH || CONFIG_MODEL_IN_SDCARD)`.
+`CONFIG_MODEL_IN_FLASH` and `CONFIG_MODEL_IN_SDCARD` are symbols esp-sr's own Kconfig defines, so with the
+component gone they are undeclared, the guard is false, and the library compiles to nothing (measured
+2026-11-14). The `removedArduinoComponents` path requires `sourcePins.arduinoCommit` (the in-container
+strip anchors on the arduino force-checkout), which this build already has.
