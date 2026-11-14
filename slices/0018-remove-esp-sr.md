@@ -174,3 +174,40 @@ dependency-tree check (invariant 7) caught it before merge, which is its purpose
 arduino library self-disables via `CONFIG_MODEL_IN_FLASH` / `CONFIG_MODEL_IN_SDCARD`, esp-sr Kconfig
 symbols that go undeclared with the component gone. Recorded in ADR-0017's amendment. A second CI build
 confirms the fix in a further amendment below.
+
+## Amendment: 2026-11-14 Second CI build confirms DoD scenarios 1 to 5
+
+CI run `43641395557` (build-only `workflow_dispatch` on `feat/remove-esp-sr`, publish skipped) finished
+all six jobs green: `pins`, `prep`, `image`, both `chips` legs, and `package`.
+
+- Scenario 1 (both chips green): met. Removing esp-sr from both manifests, the `esp_sr` feature, and the
+  `srmodels_bin` step broke neither build.
+- Scenario 2 (`0018-verify`): met. The built esp32s3 subtree has no `esp_sr/` model directory, the base
+  `esp32s3/sdkconfig` reports `FLASHSIZE_4MB` and not `16MB`, and all five mem-variant `sdkconfig.h`
+  files (`qio_qspi`, `dio_qspi`, `qio_opi`, `dio_opi`, `opi_opi`) carry no 16MB define.
+- Scenario 3 (`0012-verify`): met. Both chips show 15 removed components absent (esp-sr now among them on
+  esp32s3) with the four kept sentinels present.
+- Scenario 4 (`0002-verify` Scenario A): met. Drop-in shape parity passed with `esp32s3/esp_sr/`
+  subtracted via `removedChipSubtrees`; `0014` and `0016` stayed green (no regression).
+- Scenario 5 (overlay helper units): met locally (99 tests green).
+
+Scenario 6 (Cardputer hardware boot re-trial) is the only one outstanding; it is recorded in a further
+amendment below once the board is flashed.
+
+## Amendment: 2026-11-14 Cardputer boot re-trial confirms DoD scenario 6
+
+The esp32s3 libs from CI run `43641395557` were consumed by the adversary firmware (its `platformio.ini`
+`framework-arduinoespressif32-libs` pinned to the built zip) and flashed to a PSRAM-less StampS3
+Cardputer over `/dev/ttyACM0`. The firmware built green (RAM 25.3%, Flash 75.9% of the consumer's own
+3.34MB app partition, so the libs' baked 4MB flash size does not constrain the consumer) and the board
+booted to the UI:
+
+- the `THE ADVERSARY` banner, M5GFX autodetect `board_M5CardputerADV`, canvas
+  `Internal: 214200, PSRAM: 0`, SD mounted (SDHC, 292 handshakes loaded), `Reset reason: USB ...
+  (crash count: 0)`, and `Initialization complete. Entering main loop.`;
+- no `Failed to init external RAM!`, no `abort`, no `Rebooting`, no boot loop (the absent WS1850S RFID
+  module logs I2C errors, unrelated to the libs).
+
+DoD scenario 6 is met: dropping esp-sr and the esp32s3 flash size from 16MB to 4MB is benign on
+hardware, with no regression from the slice-0016 boot. All six Definition-of-Done scenarios are now met;
+the slice is ready to merge.
