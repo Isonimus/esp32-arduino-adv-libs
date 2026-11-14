@@ -140,3 +140,17 @@ python universal-newline rewrite breaking CRLF parity (fixed with `newline=""`).
 Definition-of-Done scenarios 3, 4 and 5 are met locally. Scenarios 1 (both chips build green) and 2
 (`0012-verify` against each chip's real `dependencies.lock`) are confirmed by the CI build this change
 triggers; the result is recorded in an amendment below at merge.
+
+## Amendment: 2026-11-14 CI confirms DoD scenarios 1 and 2
+
+CI run 43616881953 (build-only on branch `slice-0012-slim-unused-stack`, dispatched via
+`workflow_dispatch`, so publish was correctly skipped by the `refs/tags/v*` gate) finished all six
+jobs green: `prep`, `pins`, `image`, both `chips` matrix legs (`esp32` and `esp32s3`), and `package`.
+
+DoD scenario 1 is met: both enabled chips built green with the unused stack removed, so no removed
+component was unconditionally required and every consumer self-disabled as measured. DoD scenario 2
+is met: the `package` job's "Verify the unused component stack is absent from the resolved tree" step
+(`scripts/0012-verify.mjs`) passed against each chip's real `dependencies.lock` in the built artifact,
+confirming no removed component reappears and the kept sentinels remain. Scenario 5's Scenario-A shape
+parity (`scripts/0002-verify.mjs`) passed in the same job. All five Definition-of-Done scenarios are
+now met; the slice is ready to merge to `main`.
