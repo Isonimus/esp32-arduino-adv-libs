@@ -31,7 +31,7 @@ jobs:
     outputs:
       chips: ${{ steps.lock.outputs.chips }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: lock
         name: Read enabled chips from UPSTREAM.lock
         run: |
@@ -46,8 +46,8 @@ jobs:
       tag: ${{ steps.build.outputs.tag }}
       id: ${{ steps.build.outputs.id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       - id: build
@@ -58,7 +58,7 @@ jobs:
           echo "id=$(node -e 'process.stdout.write(require("./work/image.json").id)')" >> "$GITHUB_OUTPUT"
       - name: Save the image for the chip jobs
         run: docker save "${{ steps.build.outputs.tag }}" | gzip > builder-image.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: builder-image
           path: builder-image.tar.gz
@@ -72,18 +72,18 @@ jobs:
       matrix:
         chip: ${{ fromJSON(needs.prep.outputs.chips) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: builder-image
       - name: Load the builder image
         run: docker load < builder-image.tar.gz
       - name: Build ${{ matrix.chip }}
         run: node scripts/build.mjs chip --work work --image "${{ needs.image.outputs.tag }}" --chip "${{ matrix.chip }}" --dist dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: chip-${{ matrix.chip }}
           path: dist/*.tar.gz
@@ -93,11 +93,11 @@ jobs:
     needs: [prep, image, chips]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: chip-*
           path: dist
@@ -107,7 +107,7 @@ jobs:
         run: node scripts/build.mjs package --dist dist --out out --image-digest "${{ needs.image.outputs.id }}"
       - name: Verify drop-in shape, manifest, and baseline (Scenarios A/C/D)
         run: node scripts/0002-verify.mjs out/adv-esp32-arduino-libs-*.zip out/manifest.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-bundle
           path: |
