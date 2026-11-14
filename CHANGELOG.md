@@ -8,6 +8,22 @@ changelog.
 
 ## Unreleased
 
+- **Enable `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` on the `esp32` libs (patch #2).** The consumer
+  `esp32-wifi-sapper` overflowed classic-ESP32 static DRAM (`.dram0.bss` by 28816 bytes on the M5StickC
+  Plus2) with two ~28 KB buffers, and the clean fix (tag them `EXT_RAM_BSS_ATTR` so they land in
+  PSRAM-backed `.ext_ram.bss`) was unavailable because the precompiled libs shipped this flag unset,
+  forcing a runtime `heap_caps_malloc` + placement-new workaround (`esp32-wifi-sapper:ADR-0080`). The
+  overlay now appends `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y` to `configs/defconfig.esp32`
+  through the existing `addedDefconfigLines` mechanism (no new build code), so the flag reaches the base
+  `esp32/sdkconfig` and every esp32 variant `sdkconfig.h`. Both preconditions were already in place:
+  `CONFIG_SPIRAM=y` and the PSRAM cache workaround off (`REV_MIN_3`, ADR-0013). It is a pure opt-in (only
+  `EXT_RAM_BSS_ATTR`-tagged symbols move), so a no-PSRAM esp32 board is unaffected; scope is esp32 only
+  (esp32s3 ships PSRAM boot-init off for a PSRAM-less reference board, ADR-0015). A `package`-time check
+  (`scripts/0022-verify.mjs`, `npm run verify:spiram-bss`, CLAUDE.md section 4 invariant 12) asserts the
+  flag is set on the base config and each variant header. The consumer can retire its runtime workaround
+  and supersede `esp32-wifi-sapper:ADR-0080` with the attribute form on the release carrying this.
+  (ADR-0021, slice-0022)
+
 - **Ship `libnet80211.a` with the deauth sanity-check symbol weak (patch #1).** The two consumer
   firmwares (`adversary`, `esp32-wifi-sapper`) override `ieee80211_raw_frame_sanity_check` in
   `deauth.cpp` to permit raw management-frame TX, and run a fragile per-build `objcopy --weaken-symbol`

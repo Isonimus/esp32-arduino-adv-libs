@@ -16,6 +16,7 @@
     "verify:psram": "node scripts/0016-verify.mjs",
     "verify:esp-sr": "node scripts/0018-verify.mjs",
     "verify:weak-deauth": "node scripts/0020-verify.mjs",
+    "verify:spiram-bss": "node scripts/0022-verify.mjs",
     "probe:bruce-blob": "node scripts/bruce-blob-shape-probe.mjs"
   }
 }
