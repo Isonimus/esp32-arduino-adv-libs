@@ -102,3 +102,34 @@ clobber `defconfig.esp32`'s stock lines), consistent with ADR-0013.
 Filled in at merge, in past tense, confirming each Definition-of-Done scenario was met or recording the
 deviation. The build, verify fail-before/pass-after, and consumer link trial results are recorded in
 amendments below at merge.
+
+## Amendment: 2026-11-15 CI build green, shipped artifact verified
+
+Shipped as designed: one `addedDefconfigLines` lock line (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`
+on `defconfig.esp32`), no new `build.mjs` code. CI run 43653935629 (workflow_dispatch on
+`feat/spiram-bss-ext`, commit 24c2f68) built both chips green and packaged. Scenario 2: `scripts/0022-verify.mjs`
+passed on the real built artifact in the `package` job: `esp32/sdkconfig` carries
+`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`, and both variant headers
+(`esp32/qio_qspi/include/sdkconfig.h`, `esp32/dio_qspi/include/sdkconfig.h`) carry `#define ... 1`
+("spiram-bss verified for esp32 (base + 2 variant header(s))"). The same verify was first shown to fail on
+the pre-patch v0.0.2 artifact (exit 1, all three surfaces flagged), so it is fail-before / pass-after.
+Scenario 4: `esp32s3` built green and `scripts/0016-verify.mjs` / `scripts/0018-verify.mjs` stayed green on
+the same artifact; the append targets `defconfig.esp32` only, so the S3 config is unchanged.
+
+## Amendment: 2026-11-15 Consumer EXT_RAM_BSS_ATTR link trial
+
+Scenario 3 (link half) proven against the sibling consumer. The CI `release-bundle` artifact was pointed at
+`esp32-wifi-sapper` `[env:m5stickc_plus2]` (classic ESP32, board esp32dev, `-DBOARD_HAS_PSRAM`, the
+`esp32-wifi-sapper:ADR-0080` board), a temporary 56 KB `EXT_RAM_BSS_ATTR` static buffer (mirroring that ADR's two ~28 KB cracked
+manifests) was added, and the installed libs cache was cleared so our libs were fetched fresh. The build
+linked green (`pio run -e m5stickc_plus2`, SUCCESS). The buffer landed in PSRAM, not DRAM, confirmed in the
+`firmware.elf`: `objdump -t` places `patch2_ext_trial` in section `.ext_ram.bss` at `0x3f800000` (PSRAM data
+range), size `0xe000` (57344 B), inside `_ext_ram_bss_start..end` (`0x3f800000..0x3f811e2c`). The `SPI DRAM
+.bss` total rose by exactly 57344 B (15916 -> 73260) while `DRAM .bss` was unchanged at 61848 B, so the
+tagged buffer consumed zero DRAM, which is the mechanism `esp32-wifi-sapper:ADR-0080` wanted and the precompiled blob denied.
+The installed libs also showed `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY 1` in both variant `sdkconfig.h`.
+All consumer-side trial edits (the temp source file, the `platformio.ini` libs swap) were reverted and the
+consumer tree left clean. On-device PSRAM-placement confirmation remains `esp32-wifi-sapper:ADR-0080`'s
+operator proof, not this repo's.
+
+All four Definition-of-Done scenarios are met; the slice is ready to land.
