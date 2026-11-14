@@ -139,8 +139,8 @@ actually wired (R11), so a row cannot claim a check that runs nowhere.
 | 1 | One concern per patch. Combining two concerns into one patch is forbidden (it refuses to answer "which change broke the link"). | ADR-0001 | review-only |
 | 2 | Each patch header cites its consuming ADR (`adversary:ADR-NNNN` or `esp32-wifi-sapper:ADR-NNNN`) with a short rationale. | ADR-0001 | review-only |
 | 3 | No post-build binary rewrite ships in a release; a correction is a source patch, never an objcopy-style post-hook. | ADR-0001 | review-only |
-| 4 | Every tagged release builds and publishes all enabled chips (`esp32`, `esp32s3`); a per-chip build failure fails the whole release. | ADR-0001 | pending (LEDGER) |
-| 5 | Every release is reconstructable from the five recorded pins (upstream builder commit, resolved IDF commit, resolved Arduino-core commit, patch-stack content hash, Docker image digest) plus the patch stack; the manifest records all five. | ADR-0001 | pending (LEDGER) |
+| 4 | Every tagged release builds and publishes all enabled chips (`esp32`, `esp32s3`); a per-chip build failure fails the whole release. | ADR-0001 | verified_by: `scripts/build.mjs` package mode (fails if any enabled chip tar is missing, `release.yml` `package` needs the `chips` matrix) |
+| 5 | Every release is reconstructable from the five recorded pins (upstream builder commit, resolved IDF commit, resolved Arduino-core commit, patch-stack content hash, Docker image digest) plus the patch stack; the manifest records all five. | ADR-0001 | verified_by: `scripts/0002-verify.mjs` (asserts the manifest carries all five pins; wired in `package.json`, R11) |
 
 When an ADR's consequences create a rule that all *future* work must follow, add the row
 in the same commit as the ADR.

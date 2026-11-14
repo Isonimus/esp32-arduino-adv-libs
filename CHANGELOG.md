@@ -6,9 +6,13 @@ changelog.
 
 ---
 
-## Unreleased
+## v0.0.1 (2026-11-13)
 
-Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
+First tagged release: the unmodified baseline. Repo bootstrap plus the build fixes that got
+both chips green. Patched ESP-IDF 5.5 + Arduino-core precompiled libs, shaped like
+`framework-arduinoespressif32-libs`, built and published for `esp32` and `esp32s3` with no
+patches applied (release run `43526028879`, tag `v0.0.1`). The release carries the zip, its
+SHA-256, and the five-pin provenance manifest.
 
 - **Thin-overlay builder fork established.** The repo owns a patched ESP-IDF 5.5 +
   Arduino-core precompiled-libs build as a thin overlay over
@@ -96,6 +100,6 @@ Repo bootstrap. No release has been tagged yet; `v0.0.1` will be the first.
   reference blob the consumers run today. The other floating components remain
   tracked in the ledger.
 
-The CI build and the `v0.0.1` tag are intentionally unproven at bootstrap:
-standing invariants 4 and 5 stay pending in `LEDGER.md` until a tagged build is
-green.
+The pipeline is now proven: the `v0.0.1` tag built green across both chips and
+published the Release, so standing invariants 4 and 5 moved from `pending (LEDGER)`
+to `verified_by` and the ledger's deferral closed.

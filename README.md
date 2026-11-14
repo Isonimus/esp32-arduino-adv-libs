@@ -29,7 +29,7 @@ platform_packages =
     ; before: the third-party Bruce blob
     ; framework-arduinoespressif32-libs @ https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip
     ; after: a release of this repo
-    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-adv-libs/releases/download/v0.0.1/adv-esp32-arduino-libs-v5.5-<date>-<sha>.zip
+    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.0.1/adv-esp32-arduino-libs-v5.5-20261113-e68e301.zip
 ```
 
 The zip's internal layout is a drop-in: the per-chip directories (`esp32/`, `esp32s3/`) sit at the

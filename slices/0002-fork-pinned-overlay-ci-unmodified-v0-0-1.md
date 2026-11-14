@@ -132,6 +132,56 @@ _Filled at merge (the freeze step): the measured Bruce-blob reference layout, th
 IDF and Arduino-core commits of the v0.0.1 build, the builder image digest, and
 confirmation that each scenario above was met or the deviation recorded._
 
+Frozen 2026-11-14 against the first fully-green tagged build: release workflow run
+`43526028879` on tag `v0.0.1` (commit `f7f4e47`), all five jobs `success` (`prep`,
+`image`, `chips (esp32)`, `chips (esp32s3)`, `package`), GitHub Release published
+2026-11-13T23:41:29Z. The push-run on the same tree (`43522518944`) had already gone green;
+the tag run rebuilt that tree from scratch and added the publish step.
+
+**Published artifact.** `adv-esp32-arduino-libs-v5.5-20261113-e68e301.zip` (109,581,426
+bytes), SHA-256 `2b7900ed9a5e7a79bef0dba1379735fd1c267a2c0ea70f00e286c5d1ae73b305`,
+carrying both enabled chips. The `-20261113-` token is the build date, not the blob's
+`20251205`: this is our build of the same snapshot, not a copy.
+
+**Five recorded pins (manifest.json on the Release, invariant 5).**
+
+- upstreamBuilderCommit: `e68e30112ffad75e96535408dfe25bff6d2f26fb`
+- resolvedIdfCommit: `8410210c9a0` (short form the builder's `versions.txt` records)
+- resolvedArduinoCommit: `9b3364c61`
+- patchStackHash: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+  (the SHA-256-of-empty sentinel; `patchStack.count` is 0)
+- builderImageDigest: `sha256:16f723997c6d3f7bd9ba7b5db0d3cb7f1fa24c430c9a67260e1494b5f7dfa9ba`
+  (the built image's ID, correctly distinct from `UPSTREAM.lock`'s `baseDigest`
+  `sha256:74b12b11...`, which pins only the `FROM` base per the Amendment below)
+
+**Measured Bruce-blob reference layout** (from `reference/bruce-blob-layout.json`, probed
+2026-11-13 off the 576,678,149-byte blob, 48,672 entries). Top-level files
+`package.json`, `tools.json`, `versions.txt`; the chip dirs include `esp32/` and `esp32s3/`
+(the blob also ships `esp32c2/`..`esp32p4/`, `hosted/`, which this slice intentionally does
+not build, per Design). Enabled-chip subtree roots the parity check asserts: `esp32` =
+`{bin/, dependencies.lock, dio_qspi/, flags/, include/, ld/, lib/, pioarduino-build.py,
+qio_qspi/, sdkconfig}`; `esp32s3` adds `dio_opi/, esp_sr/, opi_opi/, qio_opi/` to that set.
+
+**Scenario outcomes.**
+
+- **A (drop-in shape parity):** met. `scripts/0002-verify.mjs` (wired as `verify:shape`)
+  asserted the built zip's top-level entries and per-chip subtree roots equal the committed
+  reference layout, and ran green in the `package` job.
+- **B (all chips or the release fails, invariant 4):** met. The `fail-fast: false` matrix
+  built both chips green; the publish gate requires every enabled chip's artifact present.
+  Not negatively exercised in this run (no chip failed), but it was exercised across the
+  bootstrap's earlier red runs, which failed the whole job and published nothing (ADR-0003,
+  ADR-0005 through ADR-0008).
+- **C (five-pin provenance manifest, invariant 5):** met. The Release carries the zip, its
+  `.sha256` sidecar, and `manifest.json` with all five pins non-empty; the sidecar and the
+  manifest agree on the zip's SHA-256.
+- **D (empty baseline stack):** met. `patches/` is empty, `patchStack.count` is 0, and the
+  manifest's `patchStackHash` is the documented empty-stack sentinel.
+
+Standing invariants 4 and 5 (CLAUDE.md section 4) flip from `pending (LEDGER)` to
+`verified_by` in the same commit as this freeze, and the LEDGER's deferral line is deleted:
+the tagged build that was the condition is now green.
+
 ## Amendment - 2026-11-13: builder image strategy resolved to build-our-own
 
 The Design above wrote "its published image is pinned by digest", which read either way:
