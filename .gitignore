@@ -1,2 +1,11 @@
 # Verify-script artifacts (slice-0002): observed-vs-expected diffs, regenerated each run.
 .verify-out/
+
+# Local build outputs (scripts/build.mjs image/chip/package modes). The cloned builder tree, per-chip
+# tars, and the packaged zip are all reproducible from the pinned inputs; never committed. The builder
+# container runs as root, so work*/ can hold root-owned files (clean with a fresh --work dir or sudo).
+node_modules/
+work/
+work-s3/
+dist/
+out/
