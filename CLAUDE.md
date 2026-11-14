@@ -141,6 +141,7 @@ actually wired (R11), so a row cannot claim a check that runs nowhere.
 | 3 | No post-build binary rewrite ships in a release; a correction is a source patch, never an objcopy-style post-hook. | ADR-0001 | review-only |
 | 4 | Every tagged release builds and publishes all enabled chips (`esp32`, `esp32s3`); a per-chip build failure fails the whole release. | ADR-0001 | verified_by: `scripts/build.mjs` package mode (fails if any enabled chip tar is missing, `release.yml` `package` needs the `chips` matrix) |
 | 5 | Every release is reconstructable from the five recorded pins (upstream builder commit, resolved IDF commit, resolved Arduino-core commit, patch-stack content hash, Docker image digest) plus the patch stack; the manifest records all five. | ADR-0001 | verified_by: `scripts/0002-verify.mjs` (asserts the manifest carries all five pins; wired in `package.json`, R11) |
+| 6 | Every `sourcePins` commit is ancestor-reachable from its declared `sourcePinUpstreams` ref (tested by ref-ancestry, never fetch-by-SHA); the `pins` preflight gates the `chips` matrix so an unreachable pin fails before the build. | ADR-0009 | verified_by: `scripts/0010-verify.mjs` (live ref-ancestry check per pin; wired as `verify:pins` in `package.json`, R11, and as the `release.yml` `pins` job the `chips` matrix needs) |
 
 When an ADR's consequences create a rule that all *future* work must follow, add the row
 in the same commit as the ADR.

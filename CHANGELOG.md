@@ -6,6 +6,22 @@ changelog.
 
 ---
 
+## Unreleased
+
+- **Source-pin reachability preflight.** A CI `pins` job proves every `UPSTREAM.lock`
+  `sourcePins` commit is ancestor-reachable from the branch the builder clones, gating the
+  `chips` matrix so an unreachable pin fails in seconds instead of at `git checkout` after a
+  ~2h build (it cost run `43494803612`). Reachability is tested by ref-ancestry, not
+  fetch-by-SHA, which GitHub answers even for unreachable objects (ADR-0009). Adds
+  `sourcePinUpstreams` to the lock, `scripts/0010-verify.mjs` (`npm run verify:pins`), and
+  CLAUDE.md section 4 invariant 6. Closes the ADR-0005 reachability-gate LEDGER item.
+- **Every floating source must be pinned, enforced loud.** A shared `REQUIRED_SOURCE_PINS`
+  contract makes both the preflight and `scripts/build.mjs` fail loud when `UPSTREAM.lock`
+  drops `arduinoCommit` or `tinyusbCommit`, instead of silently cloning floating `master`
+  heads (the ADR-0005 drift). Found by slice-0010's adversarial review.
+
+---
+
 ## v0.0.1 (2026-11-13)
 
 First tagged release: the unmodified baseline. Repo bootstrap plus the build fixes that got

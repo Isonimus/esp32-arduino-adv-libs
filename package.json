@@ -10,6 +10,7 @@
     "index": "node scripts/build-index.mjs .",
     "index:check": "node scripts/build-index.mjs --check .",
     "verify:shape": "node scripts/0002-verify.mjs",
+    "verify:pins": "node scripts/0010-verify.mjs",
     "probe:bruce-blob": "node scripts/bruce-blob-shape-probe.mjs"
   }
 }

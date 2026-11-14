@@ -85,7 +85,10 @@ touching the overlay builds every chip and fails whole on any chip failing, but 
   source commits (`sourcePins`: ESP-IDF via `-i`, arduino-esp32 and tinyusb via force-checkouts the
   overlay injects into `build.sh`, so the build is pinned to one reproducible snapshot rather than
   floating branch heads, see
-  [`adr/0005-pin-floating-sources-to-reproducibility-snapshot.md`](adr/0005-pin-floating-sources-to-reproducibility-snapshot.md));
+  [`adr/0005-pin-floating-sources-to-reproducibility-snapshot.md`](adr/0005-pin-floating-sources-to-reproducibility-snapshot.md);
+  each pin's upstream repo and branch is recorded in `sourcePinUpstreams`, so a CI preflight proves
+  the commit is reachable before the ~2h build rather than failing the checkout mid-build, see
+  [`adr/0009-test-source-pin-reachability-by-ref-ancestry.md`](adr/0009-test-source-pin-reachability-by-ref-ancestry.md));
   the managed-component version pins (`managedComponentPins`, applied to the builder's
   `main/idf_component.yml` so the component manager cannot resolve a floating "latest", see
   [`adr/0004-managed-component-version-pins.md`](adr/0004-managed-component-version-pins.md)); the

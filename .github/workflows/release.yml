@@ -64,8 +64,22 @@ jobs:
           path: builder-image.tar.gz
           retention-days: 1
 
+  pins:
+    # Reachability preflight (ADR-0009): prove every UPSTREAM.lock sourcePins commit is
+    # ancestor-reachable from the branch the builder clones, so build.sh's checkout will find it.
+    # Seconds and tens of MB per pin; gates the chips matrix so an unreachable pin fails here, not
+    # after a ~2h build (it cost run 43494803612; ADR-0005 Amendment).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - name: Prove source pins are reachable before building
+        run: npm run verify:pins
+
   chips:
-    needs: [prep, image]
+    needs: [prep, image, pins]
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false

@@ -26,6 +26,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { patchStack } from './lib/provenance.mjs';
+import { assertRequiredSourcePins } from './lib/source-pins.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PATCHES_DIR = join(REPO_ROOT, 'patches');
@@ -151,9 +152,11 @@ function cmdChip(args) {
   if (!upstream.idfBranch) {
     throw new Error('UPSTREAM.lock upstream.idfBranch is required (the builder defaults to release/v5.3; see ADR-0003, ADR-0005)');
   }
-  if (!sourcePins?.idfCommit) {
-    throw new Error('UPSTREAM.lock sourcePins.idfCommit is required (pin the IDF commit, not the floating branch head; see ADR-0005)');
-  }
+  // All three floating sources must be pinned, not just IDF: with only idfCommit present the pin
+  // injection below is skipped and arduino/tinyusb clone floating master heads (ADR-0005). The CI
+  // preflight (scripts/0010-verify.mjs) enforces the same contract via this shared assertion, so a
+  // direct local build cannot float a source that CI would have caught.
+  assertRequiredSourcePins(sourcePins);
   if (!builderCxxStandard?.from || !builderCxxStandard?.to) {
     throw new Error('UPSTREAM.lock builderCxxStandard {from,to} is required: the pinned arduino master base needs C++20, but the builder forces gnu++17, so without this overlay the build fails deep in the compile (see ADR-0007)');
   }
