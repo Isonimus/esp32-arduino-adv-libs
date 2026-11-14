@@ -10,3 +10,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # upload-artifact and download-artifact are a matched pair in release.yml: the
+      # chips jobs upload, the package job downloads, and they must share an artifact
+      # backend generation to interop. Dependabot sees them as independent deps and
+      # would otherwise open a PR for one without the other, re-introducing the
+      # cross-major skew that was fixed by hand in 597766d. Grouping forces them into
+      # one PR so the pair always moves together.
+      artifact-actions:
+        patterns:
+          - actions/upload-artifact
+          - actions/download-artifact
