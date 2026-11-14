@@ -487,6 +487,75 @@ export function stripEspSrModelStep(buildShText) {
   return buildShText.slice(0, startIdx) + buildShText.slice(endIdx + endAnchor.length);
 }
 
+/**
+ * Inject an in-build symbol-weakening step into the builder's build.sh (ADR-0019). net80211 is a vendored
+ * binary blob (the closed-source esp-wifi-lib submodule, copied verbatim, never compiled), so a source
+ * `__attribute__((weak))` cannot weaken its already-defined `ieee80211_raw_frame_sanity_check` symbol; the
+ * only lever is `objcopy --weaken-symbol` on the archive. Weakening it in our build ships the archive
+ * weak-by-construction, so the consumer firmwares retire their fragile post-fetch objcopy hook
+ * (adversary:ADR-0027/0029). This is the vendored-blob carve-out ADR-0019 adds to standing invariant 3;
+ * a source-available target stays a source patch.
+ *
+ * The block is inserted right after the per-target idf-libs anchor (unique; runs inside the target loop
+ * with $target and $AR_TOOLS in scope), so each archive is weakened the moment idf-libs produces it, for
+ * every chip the loop visits. weakenArchiveSymbols maps an archive basename to the symbols to weaken.
+ * Generated bash fails loud: it resolves an xtensa objcopy or exits; asserts each archive exists; and
+ * asserts each symbol is a defined (T or W) symbol via nm before weakening, so a symbol renamed or removed
+ * upstream cannot let `objcopy --weaken-symbol` silently no-op and ship a strong symbol. The authoritative
+ * check that the shipped archive is weak is scripts/0020-verify.mjs on the built zip. Pure: takes and
+ * returns text; fails loud if the anchor is gone, a map value is not a non-empty array of symbol names,
+ * or an archive basename / symbol name is not a safe token (it is interpolated into bash and a regex).
+ */
+export function injectWeakenArchiveSymbols(buildShText, weakenArchiveSymbols) {
+  const map = weakenArchiveSymbols ?? {};
+  const archives = Object.keys(map);
+  if (!archives.length) return buildShText;
+  const anchor = '    idf.py -DIDF_TARGET="$target" -DSDKCONFIG_DEFAULTS="$idf_libs_configs" idf-libs\n    if [ $? -ne 0 ]; then exit 1; fi\n';
+  const anchorIdx = buildShText.indexOf(anchor);
+  if (anchorIdx === -1) {
+    throw new Error('injectWeakenArchiveSymbols: idf-libs anchor not found in build.sh (upstream layout changed; ADR-0019)');
+  }
+  const lines = [
+    '',
+    '    # Weaken vendored-blob archive symbols so the consumer override links without a post-fetch objcopy hook (ADR-0019).',
+    '    weaken_objcopy=$(command -v xtensa-esp-elf-objcopy || command -v xtensa-${target}-elf-objcopy || true)',
+    '    if [ -z "$weaken_objcopy" ]; then echo "ERROR(ADR-0019): no xtensa objcopy found to weaken symbols for $target"; exit 1; fi',
+  ];
+  // The archive basename and symbol names are interpolated into generated bash (a path, an objcopy
+  // argument) and into a `grep -qE` pattern, so they are validated to safe, constrained tokens rather
+  // than escaped: an archive is a library basename and a symbol is a C identifier. Anything else is a
+  // malformed lock entry, so fail loud rather than emit bash or a regex that could misbehave (ADR-0019).
+  const SAFE_ARCHIVE = /^[\w.-]+$/;
+  const C_IDENTIFIER = /^[A-Za-z_]\w*$/;
+  for (const archive of archives) {
+    if (!SAFE_ARCHIVE.test(archive)) {
+      throw new Error(`injectWeakenArchiveSymbols: archive name ${JSON.stringify(archive)} is not a safe library basename (letters, digits, '_', '.', '-'); refusing to interpolate it into build.sh (ADR-0019)`);
+    }
+    const symbols = map[archive];
+    if (!Array.isArray(symbols) || !symbols.length) {
+      throw new Error(`injectWeakenArchiveSymbols: weakenArchiveSymbols["${archive}"] must be a non-empty array of symbol names, got ${JSON.stringify(symbols)} (ADR-0019)`);
+    }
+    for (const symbol of symbols) {
+      if (typeof symbol !== 'string' || !symbol.length) {
+        throw new Error(`injectWeakenArchiveSymbols: weakenArchiveSymbols["${archive}"] has a non-string symbol ${JSON.stringify(symbol)} (ADR-0019)`);
+      }
+      if (!C_IDENTIFIER.test(symbol)) {
+        throw new Error(`injectWeakenArchiveSymbols: symbol ${JSON.stringify(symbol)} is not a valid C identifier; refusing to interpolate it into the objcopy argument and grep pattern (ADR-0019)`);
+      }
+      lines.push(
+        `    weaken_lib="$AR_TOOLS/esp32-arduino-libs/$target/lib/${archive}"`,
+        '    if [ ! -f "$weaken_lib" ]; then echo "ERROR(ADR-0019): $weaken_lib not found (idf-libs did not produce it?)"; exit 1; fi',
+        `    if ! nm "$weaken_lib" | grep -qE ' [TW] ${symbol}$'; then echo "ERROR(ADR-0019): ${symbol} is not a defined symbol in $weaken_lib (upstream renamed or removed it?)"; exit 1; fi`,
+        `    "$weaken_objcopy" --weaken-symbol=${symbol} "$weaken_lib"`,
+        `    if [ $? -ne 0 ]; then echo "ERROR(ADR-0019): objcopy --weaken-symbol=${symbol} failed on $weaken_lib"; exit 1; fi`,
+      );
+    }
+  }
+  const block = `${lines.join('\n')}\n`;
+  const insertAt = anchorIdx + anchor.length;
+  return buildShText.slice(0, insertAt) + block + buildShText.slice(insertAt);
+}
+
 // Apply our delta onto the cloned tree, as overlay rewrites (never numbered source patches, which are
 // reserved for consumer-ADR features). All steps are optional; the empty baseline and the later patched
 // releases share one code path. Where each step writes:
@@ -500,7 +569,7 @@ function applyOverlay(builderDir, overlay) {
   const {
     managedComponentPins, sourcePins, removedComponents, removedArduinoComponents,
     removedDefconfigSymbols, addedDefconfigLines, removedBuildFeatures,
-    builderCxxStandard, builderCxxRemoveDefines,
+    builderCxxStandard, builderCxxRemoveDefines, weakenArchiveSymbols,
   } = overlay;
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
@@ -550,7 +619,11 @@ function applyOverlay(builderDir, overlay) {
   // removes it too, or the step's `idf.py srmodels_bin` (a target esp-sr's CMake registers) fails the
   // esp32s3 build once esp-sr leaves the manifest (ADR-0017).
   const stripSrModelStep = Boolean(removedBuildFeatures?.esp32s3?.includes('esp_sr'));
-  if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit || stripSrModelStep) {
+  // Weaken vendored-blob archive symbols (ADR-0019): ship libnet80211.a with the deauth sanity-check
+  // symbol weak so the consumer override links without a post-fetch objcopy hook.
+  const weakenArchives = weakenArchiveSymbols ?? {};
+  const weakenArchiveCount = Object.keys(weakenArchives).length;
+  if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit || stripSrModelStep || weakenArchiveCount) {
     const buildShPath = join(builderDir, 'build.sh');
     let buildSh = readFileSync(buildShPath, 'utf8');
     if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) buildSh = pinBuildSources(buildSh, sourcePins);
@@ -564,6 +637,7 @@ function applyOverlay(builderDir, overlay) {
       });
     }
     if (stripSrModelStep) buildSh = stripEspSrModelStep(buildSh);
+    if (weakenArchiveCount) buildSh = injectWeakenArchiveSymbols(buildSh, weakenArchiveSymbols);
     writeFileSync(buildShPath, buildSh);
   }
   const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
@@ -572,11 +646,12 @@ function applyOverlay(builderDir, overlay) {
   const defconfigSummary = removedDefconfigSymbols?.length ? `${removedDefconfigSymbols.length} symbol(s)` : 'none';
   const addedDefconfigSummary = Object.entries(addedDefconfigLines ?? {}).map(([f, l]) => `${f}+${l.length}`).join(', ') || 'none';
   const buildFeatureSummary = Object.entries(removedBuildFeatures ?? {}).map(([t, f]) => `${t}-[${f.join(',')}]`).join(', ') || 'none';
+  const weakenSummary = Object.entries(weakenArchives).map(([a, s]) => `${a}:[${s.join(',')}]`).join(', ') || 'none';
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
   const cxxSummary = builderCxxStandard ? `${builderCxxStandard.from} -> ${builderCxxStandard.to}` : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, defconfig-add ${addedDefconfigSummary}, removed build features ${buildFeatureSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, defconfig-add ${addedDefconfigSummary}, removed build features ${buildFeatureSummary}, weaken archive symbols ${weakenSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---

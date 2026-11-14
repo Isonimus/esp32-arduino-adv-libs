@@ -8,6 +8,19 @@ changelog.
 
 ## Unreleased
 
+- **Ship `libnet80211.a` with the deauth sanity-check symbol weak (patch #1).** The two consumer
+  firmwares (`adversary`, `esp32-wifi-sapper`) override `ieee80211_raw_frame_sanity_check` in
+  `deauth.cpp` to permit raw management-frame TX, and run a fragile per-build `objcopy --weaken-symbol`
+  hook so that override links; a `framework-arduinoespressif32-libs` reinstall silently reverts it.
+  net80211 is a closed-source vendored blob (no source to patch), so the overlay now weakens the symbol
+  in-build with `objcopy` on the archive, right after `build.sh`'s per-chip `idf-libs` step (new
+  `weakenArchiveSymbols` lock field and the `injectWeakenArchiveSymbols` overlay helper, fail-loud if the
+  symbol is renamed upstream). The shipped archive is weak-by-construction, so consumers retire their
+  hook (their `ADR-0027`/`ADR-0029`). A `package`-time check (`scripts/0020-verify.mjs`, `npm run
+  verify:weak-deauth`, CLAUDE.md section 4 invariant 11) asserts `nm` reports the symbol weak (`W`) on
+  every chip. This is a verified vendored-binary weakening, which ADR-0019 distinguishes from the
+  fragile consumer post-fetch rewrite that invariant 3 bans. (ADR-0019, slice-0020)
+
 - **Removed `esp-sr`, the last unused component.** The two consumer firmwares link no speech-recognition
   API, so the overlay now drops `espressif/esp-sr` from both manifests that declare it (the builder's
   `main/idf_component.yml` host-side and arduino-esp32's own manifest in-container; its `ESP_SR` library
