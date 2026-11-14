@@ -101,3 +101,24 @@ different seam (build.sh rewrite) and are left untouched.
 
 Filled at merge, in past tense, confirming each Definition-of-Done scenario was met or recording the
 deviation. The rebuild-and-retrial result is recorded in an amendment below at merge.
+
+## Amendment: 2026-11-14 Built and hardware-proven
+
+Shipped as designed. The overlay appends `CONFIG_ESP32_REV_MIN_3=y` to `configs/defconfig.esp32` via the
+new `addedDefconfigLines` field and the `appendDefconfigLines` helper. Scenario 1 (the overlay append
+and its fail-loud guard) was covered by `test/rev-min-overlay.test.mjs` (part of the 86-test suite,
+green with lint and the index); an adversarial pass (one Sonnet reviewer, blind to intent) found no
+shipping defect, and the guard was hardened at root (CRLF/indent/spaced-equals tolerance, rejecting a
+malformed appended line) with before/after tests.
+
+A full local Docker rebuild of both chips off the committed tree confirmed the remaining scenarios:
+- Scenario 2 (resolved config): `scripts/0014-verify.mjs` passed on the built zip: `esp32/sdkconfig`
+  resolves `CONFIG_ESP32_REV_MIN_3=y` with `CONFIG_SPIRAM_CACHE_WORKAROUND` absent. The same verify was
+  first shown to fail on the unfixed v0.0.1 artifact.
+- Scenario 3 (drop-in link): adversary `m5stick` (esp32, board esp32-pico-devkitm-2) re-linked against
+  the rebuilt esp32 libs built green (RAM 20.9%, Flash 79.4%, ESP32 image created); the 7272-byte
+  `.iram0.text` overflow that failed the pre-fix link is gone.
+- Scenario 4 (S3 untouched): `esp32s3` built green and the append targets `defconfig.esp32` only.
+- Shape parity (`0002`) and slim (`0012`) stayed green on the same artifact.
+
+All Definition-of-Done scenarios are met; the slice is ready to merge.

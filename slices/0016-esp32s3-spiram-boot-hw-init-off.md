@@ -87,3 +87,24 @@ mechanism, which is the point of having keyed the field by defconfig basename. T
 
 Filled at merge, in past tense, confirming each Definition-of-Done scenario was met or recording the
 deviation. The rebuild and the Cardputer boot re-trial are recorded in an amendment below at merge.
+
+## Amendment: 2026-11-14 Built and hardware-proven
+
+Shipped as designed. The overlay appends `CONFIG_SPIRAM_BOOT_HW_INIT=n` to `configs/defconfig.qio_ram`
+via the `addedDefconfigLines` field (reusing slice-0014's `appendDefconfigLines` helper, no new overlay
+code); `scripts/0014-verify.mjs` was scoped to enabled-chip keys so it ignores the memory-fragment key.
+The 86-test suite, lint and the index were green, and both verifies were shown to fail on the unfixed
+v0.0.1 artifact and pass on the simulated and real fix.
+
+A full local Docker rebuild of both chips off the committed tree confirmed the DoD scenarios:
+- Scenario 1 (resolved config): `scripts/0016-verify.mjs` passed on the built zip: the base
+  `esp32s3/sdkconfig` and both quad/qspi variants (`qio_qspi`, `dio_qspi`) no longer enable
+  `CONFIG_SPIRAM_BOOT_HW_INIT`.
+- Scenario 2 (boots on hardware): the rebuilt libs flashed to a PSRAM-less StampS3 Cardputer booted to
+  the firmware UI (the "THE ADVERSARY" banner, M5GFX board `M5CardputerADV`, canvas
+  "Internal: 214200, PSRAM: 0", SD card mounted, 292 captures loaded, crash count 0) with no
+  `Failed to init external RAM!` abort and no boot loop, where the pre-fix v0.0.1 boot-looped.
+- Scenario 3 (no regression): both chips built green; the append targets `defconfig.qio_ram` only, so
+  the octal (`opi`) path and the esp32 config are unchanged, and `scripts/0014-verify.mjs` still passed.
+
+All Definition-of-Done scenarios are met; the slice is ready to merge.
