@@ -518,8 +518,11 @@ export function injectWeakenArchiveSymbols(buildShText, weakenArchiveSymbols) {
   const lines = [
     '',
     '    # Weaken vendored-blob archive symbols so the consumer override links without a post-fetch objcopy hook (ADR-0019).',
+    '    # Resolve toolchain-prefixed binutils: the IDF build container ships no bare nm/objcopy on PATH, only the xtensa cross tools.',
     '    weaken_objcopy=$(command -v xtensa-esp-elf-objcopy || command -v xtensa-${target}-elf-objcopy || true)',
     '    if [ -z "$weaken_objcopy" ]; then echo "ERROR(ADR-0019): no xtensa objcopy found to weaken symbols for $target"; exit 1; fi',
+    '    weaken_nm=$(command -v xtensa-esp-elf-nm || command -v xtensa-${target}-elf-nm || true)',
+    '    if [ -z "$weaken_nm" ]; then echo "ERROR(ADR-0019): no xtensa nm found to verify symbols for $target"; exit 1; fi',
   ];
   // The archive basename and symbol names are interpolated into generated bash (a path, an objcopy
   // argument) and into a `grep -qE` pattern, so they are validated to safe, constrained tokens rather
@@ -545,7 +548,7 @@ export function injectWeakenArchiveSymbols(buildShText, weakenArchiveSymbols) {
       lines.push(
         `    weaken_lib="$AR_TOOLS/esp32-arduino-libs/$target/lib/${archive}"`,
         '    if [ ! -f "$weaken_lib" ]; then echo "ERROR(ADR-0019): $weaken_lib not found (idf-libs did not produce it?)"; exit 1; fi',
-        `    if ! nm "$weaken_lib" | grep -qE ' [TW] ${symbol}$'; then echo "ERROR(ADR-0019): ${symbol} is not a defined symbol in $weaken_lib (upstream renamed or removed it?)"; exit 1; fi`,
+        `    if ! "$weaken_nm" "$weaken_lib" | grep -qE ' [TW] ${symbol}$'; then echo "ERROR(ADR-0019): ${symbol} is not a defined symbol in $weaken_lib (upstream renamed or removed it?)"; exit 1; fi`,
         `    "$weaken_objcopy" --weaken-symbol=${symbol} "$weaken_lib"`,
         `    if [ $? -ne 0 ]; then echo "ERROR(ADR-0019): objcopy --weaken-symbol=${symbol} failed on $weaken_lib"; exit 1; fi`,
       );

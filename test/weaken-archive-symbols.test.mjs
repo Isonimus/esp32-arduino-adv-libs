@@ -40,9 +40,12 @@ test('injectWeakenArchiveSymbols inserts the weaken block right after the idf-li
 test('the generated block resolves an xtensa objcopy and guards + weakens each named symbol', () => {
   const out = injectWeakenArchiveSymbols(BUILD_SH, ONE);
   assert.ok(out.includes('weaken_objcopy=$(command -v xtensa-esp-elf-objcopy'), 'resolves objcopy');
+  // The IDF container has no bare nm/objcopy; both must be toolchain-prefixed cross tools.
+  assert.ok(out.includes('weaken_nm=$(command -v xtensa-esp-elf-nm'), 'resolves a toolchain-prefixed nm, not bare nm');
+  assert.ok(!out.includes('    if ! nm "$weaken_lib"'), 'does not call bare nm (absent in the build container)');
   assert.ok(out.includes('weaken_lib="$AR_TOOLS/esp32-arduino-libs/$target/lib/libnet80211.a"'), 'targets the per-chip archive');
   // The nm presence guard: a symbol renamed/removed upstream must fail loud, not let objcopy no-op.
-  assert.ok(out.includes("nm \"$weaken_lib\" | grep -qE ' [TW] ieee80211_raw_frame_sanity_check$'"), 'nm presence guard present');
+  assert.ok(out.includes("\"$weaken_nm\" \"$weaken_lib\" | grep -qE ' [TW] ieee80211_raw_frame_sanity_check$'"), 'nm presence guard present');
   assert.ok(out.includes('"$weaken_objcopy" --weaken-symbol=ieee80211_raw_frame_sanity_check "$weaken_lib"'), 'runs the weaken');
 });
 

@@ -122,3 +122,16 @@ post-fetch rewrite.
 Scenario 1 on the real CI artifact, and scenario 4 (the `adversary` consumer-link re-trial with its
 `weaken_deauth` hook disabled), are recorded in amendments below once CI finishes and the board is
 flashed.
+
+## Amendment: 2026-11-14 First CI build caught a missing toolchain-prefixed nm
+
+The first build-only CI run (`43647538215`, `workflow_dispatch` on `feat/weak-deauth`, publish skipped)
+failed both `chips` legs at the weaken step: `./build.sh: line 244: nm: command not found`, which tripped
+the `nm` presence guard's fail-loud path (`ERROR(ADR-0019): ieee80211_raw_frame_sanity_check is not a
+defined symbol ...`). Root cause: the IDF build container ships no bare `nm` on PATH, only the
+toolchain-prefixed xtensa cross tools. `objcopy` resolution had already succeeded (it resolves
+`xtensa-esp-elf-objcopy`), so the fix is symmetric: resolve `weaken_nm` as `xtensa-esp-elf-nm` (falling
+back to the per-chip prefix), fail loud if absent, and use `"$weaken_nm"` in the guard. This is the
+dependency on the build environment the guard exists to surface, caught before any publish. A unit test
+now asserts the generated block resolves a prefixed `nm` and never calls bare `nm`. A second CI build
+confirms the fix in a further amendment below.
