@@ -12,6 +12,7 @@
     "verify:shape": "node scripts/0002-verify.mjs",
     "verify:pins": "node scripts/0010-verify.mjs",
     "verify:slim": "node scripts/0012-verify.mjs",
+    "verify:revmin": "node scripts/0014-verify.mjs",
     "probe:bruce-blob": "node scripts/bruce-blob-shape-probe.mjs"
   }
 }

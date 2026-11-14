@@ -8,6 +8,15 @@ changelog.
 
 ## Unreleased
 
+- **Fixed the esp32 drop-in: build for `ESP32_REV_MIN=3`.** A `v0.0.1` trial build measured that the
+  unmodified esp32 libs overflow esp32 IRAM by 7272 bytes when a consumer firmware links against them
+  (adversary `m5stick`), while both `esp32s3` targets and the reference blob link clean. The stock
+  esp32 defconfig takes `REV_MIN=0`, which force-enables the PSRAM cache workaround and relocates libc
+  into IRAM. The overlay now appends `CONFIG_ESP32_REV_MIN_3=y` to `configs/defconfig.esp32` (a new
+  `addedDefconfigLines` lock field and the `appendDefconfigLines` overlay helper), matching the blob
+  and dropping the workaround. Raises the minimum supported ESP32 silicon to rev 3.0, which the
+  consumers already run on. Standing invariant 8 and `scripts/0014-verify.mjs` guard it. (ADR-0013,
+  slice-0014)
 - **Slimmed the build to what the consumers use.** Removed the unused Zigbee, RainMaker, TFLite-Micro
   and camera stack so the released libs no longer download or build it: `esp32-camera` and
   `esp-tflite-micro` from the builder's `main/idf_component.yml`, and the Zigbee pair plus the whole

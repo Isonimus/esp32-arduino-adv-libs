@@ -307,6 +307,64 @@ export function stripDefconfigSymbols(defconfigText, symbols) {
 }
 
 /**
+ * The `CONFIG_<NAME>` symbol a defconfig line sets, or null if the line is not a config assignment or
+ * an "is not set" comment (a blank line, a prose comment, an `idf:` key). Tolerant of the format
+ * variants an upstream edit might use, so the clash guard below cannot be slipped by one: leading
+ * indentation, any spacing around `#` and `=`, and trailing whitespace or a CRLF `\r` (matched by
+ * `\s`). Used both to validate an appended line and to detect a same-symbol line already in the file.
+ */
+function defconfigSymbol(line) {
+  const m = /^\s*(CONFIG_[A-Za-z0-9_]+)\s*=/.exec(line)
+    ?? /^\s*#\s*(CONFIG_[A-Za-z0-9_]+)\s+is not set\s*$/.exec(line);
+  return m ? m[1] : null;
+}
+
+/**
+ * Append `CONFIG_...` lines to a builder defconfig fragment (ADR-0013). The additive counterpart to
+ * stripDefconfigSymbols: where that removes an orphaned symbol, this sets one the stock defconfig
+ * omits. Used to raise the esp32 minimum chip revision (`CONFIG_ESP32_REV_MIN_3=y`), which drops the
+ * PSRAM cache workaround and its IRAM-resident libc so the esp32 libs regain IRAM parity with the
+ * reference blob. Trailing blank lines are normalised to a single terminating newline; every other
+ * stock line is preserved. Pure. Fails loud if an appended line is not a well-formed config line, or
+ * if its symbol is already set in the file by any line (so an upstream that starts setting it, making
+ * our override redundant or conflicting, surfaces rather than silently duplicating or clashing).
+ */
+export function appendDefconfigLines(defconfigText, lines) {
+  const base = defconfigText.replace(/\n+$/, '');
+  const present = base === '' ? [] : base.split('\n');
+  const presentSymbols = new Set(present.map(defconfigSymbol).filter(Boolean));
+  for (const line of lines) {
+    const symbol = defconfigSymbol(line);
+    if (!symbol) {
+      throw new Error(`appendDefconfigLines: "${line}" is not a CONFIG_ assignment or "is not set" line (ADR-0013)`);
+    }
+    if (presentSymbols.has(symbol) || present.includes(line)) {
+      throw new Error(`appendDefconfigLines: symbol ${symbol} already present in defconfig (upstream changed, or already appended; ADR-0013)`);
+    }
+    present.push(line);
+    presentSymbols.add(symbol);
+  }
+  return `${present.join('\n')}\n`;
+}
+
+/**
+ * Apply `addedDefconfigLines` (ADR-0013) against a builder `configs/` dir: for each keyed basename,
+ * append its lines to that defconfig fragment with appendDefconfigLines. Fails loud if a keyed file is
+ * absent, so a lock targeting a defconfig the builder no longer ships cannot silently no-op. The fs
+ * wrapper around the pure appendDefconfigLines, split out so both the absent-file guard and the append
+ * are unit-testable (parallels stripDefconfigSymbols' pure/wired split).
+ */
+export function applyAddedDefconfigLines(configsDir, addedDefconfigLines) {
+  for (const [basename, lines] of Object.entries(addedDefconfigLines ?? {})) {
+    const p = join(configsDir, basename);
+    if (!existsSync(p)) {
+      throw new Error(`applyAddedDefconfigLines: target ${basename} not found in ${configsDir} (upstream changed; ADR-0013)`);
+    }
+    writeFileSync(p, appendDefconfigLines(readFileSync(p, 'utf8'), lines));
+  }
+}
+
+/**
  * Remove an orphaned `-D<define>` from the builder's root CMakeLists CXX_COMPILE_OPTIONS line. With
  * the CHIP/Matter sources gone (ADR-0006), `-DCHIP_HAVE_CONFIG_H` on that line (the same line ADR-0007's
  * setBuilderCxxStandard rewrites) is read by nothing. Removes the define and one adjacent `;` separator
@@ -361,7 +419,7 @@ export function injectArduinoManifestStrip(buildShText, { arduinoCommit, scriptN
 function applyOverlay(builderDir, overlay) {
   const {
     managedComponentPins, sourcePins, removedComponents, removedArduinoComponents,
-    removedDefconfigSymbols, builderCxxStandard, builderCxxRemoveDefines,
+    removedDefconfigSymbols, addedDefconfigLines, builderCxxStandard, builderCxxRemoveDefines,
   } = overlay;
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
@@ -383,6 +441,9 @@ function applyOverlay(builderDir, overlay) {
     const defconfigPath = join(builderDir, 'configs', 'defconfig.common');
     writeFileSync(defconfigPath, stripDefconfigSymbols(readFileSync(defconfigPath, 'utf8'), removedDefconfigSymbols));
   }
+  // Append lines to a per-chip builder defconfig fragment (ADR-0013): esp32 gets CONFIG_ESP32_REV_MIN_3=y,
+  // keyed by basename so build.sh picks it up in every phase via configs/defconfig.$target.
+  applyAddedDefconfigLines(join(builderDir, 'configs'), addedDefconfigLines);
   const manifestPath = join(builderDir, 'main', 'idf_component.yml');
   const removals = removedComponents ?? [];
   if (removals.length) {
@@ -415,11 +476,12 @@ function applyOverlay(builderDir, overlay) {
   const removeSummary = removals.join(', ') || 'none';
   const arduinoRemoveSummary = arduinoStrip.join(', ') || 'none';
   const defconfigSummary = removedDefconfigSymbols?.length ? `${removedDefconfigSymbols.length} symbol(s)` : 'none';
+  const addedDefconfigSummary = Object.entries(addedDefconfigLines ?? {}).map(([f, l]) => `${f}+${l.length}`).join(', ') || 'none';
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
   const cxxSummary = builderCxxStandard ? `${builderCxxStandard.from} -> ${builderCxxStandard.to}` : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, defconfig-add ${addedDefconfigSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---
