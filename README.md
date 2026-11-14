@@ -63,9 +63,12 @@ and roughly an hour per chip.
 # 1. Build our lean builder image (base pinned by digest); records work/image.json.
 node scripts/build.mjs image --work work
 
-# 2. Build each enabled chip into dist/ (repeat per chip in UPSTREAM.lock enabledChips).
-node scripts/build.mjs chip --work work --image <tag-from-image.json> --chip esp32   --dist dist
-node scripts/build.mjs chip --work work --image <tag-from-image.json> --chip esp32s3 --dist dist
+# 2. Build each enabled chip into dist/ (repeat per chip in UPSTREAM.lock enabledChips). Use a SEPARATE
+#    --work dir per chip: the builder container runs as root and leaves root-owned files in the clone,
+#    so reusing one dir makes the next chip's cleanup fail (EACCES). CI runs each chip in its own job,
+#    so it never hits this; locally, a fresh dir per chip (or sudo-removing the old one) sidesteps it.
+node scripts/build.mjs chip --work work-esp32   --image <tag-from-image.json> --chip esp32   --dist dist
+node scripts/build.mjs chip --work work-esp32s3 --image <tag-from-image.json> --chip esp32s3 --dist dist
 
 # 3. Combine into the Bruce-shaped zip + five-pin manifest.
 node scripts/build.mjs package --dist dist --out out --image-digest <id-from-image.json>
