@@ -148,14 +148,26 @@ function main() {
   for (const f of built.files) {
     if (!reference.topLevelFiles.includes(f)) failures.push(`A: unexpected top-level file "${f}"`);
   }
-  // Per-chip subtree roots must match the reference exactly.
+  // Per-chip subtree roots must match the reference, minus any subtree we deliberately remove
+  // (UPSTREAM.lock removedChipSubtrees, ADR-0017). Removing esp-sr drops esp32s3/esp_sr/, which the
+  // blob ships, so we subtract the declared removals rather than weaken the check to a subset: a kept
+  // root (lib/, include/, ...) going missing must still fail. A declared removal that is not actually
+  // in the reference fails loud, so a typo cannot silently relax the match.
+  const removedChipSubtrees = lock.removedChipSubtrees ?? {};
   const observedChipMembers = {};
   for (const chip of enabledChips) {
     const members = chipMembers(names, chip);
     observedChipMembers[chip] = members;
-    const expected = reference.enabledChipMembers[chip];
+    const referenceMembers = reference.enabledChipMembers[chip];
+    const removedHere = removedChipSubtrees[chip] ?? [];
+    for (const sub of removedHere) {
+      if (!referenceMembers.includes(sub)) {
+        failures.push(`A: removedChipSubtrees lists "${chip}/${sub}" but it is not in the reference blob (stale removal?)`);
+      }
+    }
+    const expected = referenceMembers.filter((m) => !removedHere.includes(m));
     if (!sameSet(members, expected)) {
-      failures.push(`A: ${chip}/ members ${JSON.stringify(members)} != reference ${JSON.stringify(expected)}`);
+      failures.push(`A: ${chip}/ members ${JSON.stringify(members)} != expected ${JSON.stringify(expected)} (reference minus removedChipSubtrees)`);
     }
   }
 

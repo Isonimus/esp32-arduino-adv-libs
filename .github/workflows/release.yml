@@ -127,6 +127,8 @@ jobs:
         run: node scripts/0014-verify.mjs out/adv-esp32-arduino-libs-*.zip
       - name: Verify esp32s3 quad variants disable SPIRAM_BOOT_HW_INIT so PSRAM-less boards boot (slice-0016)
         run: node scripts/0016-verify.mjs out/adv-esp32-arduino-libs-*.zip
+      - name: Verify esp-sr is removed (no esp32s3/esp_sr model dir, flash size back to 4MB) (slice-0018)
+        run: node scripts/0018-verify.mjs out/adv-esp32-arduino-libs-*.zip
       - uses: actions/upload-artifact@v7
         with:
           name: release-bundle

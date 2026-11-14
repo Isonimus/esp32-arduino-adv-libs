@@ -14,6 +14,7 @@
     "verify:slim": "node scripts/0012-verify.mjs",
     "verify:revmin": "node scripts/0014-verify.mjs",
     "verify:psram": "node scripts/0016-verify.mjs",
+    "verify:esp-sr": "node scripts/0018-verify.mjs",
     "probe:bruce-blob": "node scripts/bruce-blob-shape-probe.mjs"
   }
 }

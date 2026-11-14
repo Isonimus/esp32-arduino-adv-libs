@@ -407,6 +407,86 @@ export function injectArduinoManifestStrip(buildShText, { arduinoCommit, scriptN
   return buildShText.replace(anchor, injected);
 }
 
+/**
+ * Remove named build features from targets in the builder's configs/builds.json (ADR-0017). The builder
+ * drives per-target feature defconfigs off each target's `features` array: build.sh composes
+ * configs/defconfig.<feature> into every build phase (idf-libs, main, bootloader, mem-variant) for every
+ * feature listed, so a feature left in the array keeps injecting its defconfig even after its component
+ * is removed. esp_sr is the esp32s3 feature removed here: with it gone, build.sh no longer composes
+ * configs/defconfig.esp_sr (which set FLASHSIZE_16MB, PARTITION_TABLE_CUSTOM and the speech-model
+ * symbols), so the esp32s3 libs fall back to the common FLASHSIZE_4MB default, matching esp32. Structural
+ * parse/modify/serialize so a feature is removed by value, not by brittle text matching; re-serialized
+ * tab-indented to match upstream. Pure: takes and returns text. Fails loud if a named target, its
+ * features array, or a named feature is absent, so a stale removal cannot silently no-op.
+ */
+export function removeBuildFeatures(buildsJsonText, removedBuildFeatures) {
+  const map = removedBuildFeatures ?? {};
+  if (!Object.keys(map).length) return buildsJsonText;
+  const builds = JSON.parse(buildsJsonText);
+  if (!Array.isArray(builds.targets)) {
+    throw new Error('removeBuildFeatures: builds.json has no targets array (upstream layout changed; ADR-0017)');
+  }
+  for (const [targetName, features] of Object.entries(map)) {
+    if (!Array.isArray(features)) {
+      throw new Error(`removeBuildFeatures: removedBuildFeatures["${targetName}"] must be an array of feature names, got ${JSON.stringify(features)} (ADR-0017)`);
+    }
+    const target = builds.targets.find((t) => t.target === targetName);
+    if (!target) throw new Error(`removeBuildFeatures: target "${targetName}" not found in builds.json (ADR-0017)`);
+    if (!Array.isArray(target.features)) {
+      throw new Error(`removeBuildFeatures: target "${targetName}" has no features array (ADR-0017)`);
+    }
+    for (const feature of features) {
+      if (!target.features.includes(feature)) {
+        throw new Error(`removeBuildFeatures: feature "${feature}" not present in target "${targetName}" (upstream changed, or already removed; ADR-0017)`);
+      }
+      target.features = target.features.filter((f) => f !== feature);
+    }
+  }
+  return `${JSON.stringify(builds, null, '\t')}\n`;
+}
+
+/**
+ * Remove the esp32s3 srmodels_bin build step from the builder's build.sh (ADR-0017). That step is
+ * esp_sr's build wiring: build.sh runs `idf.py ... srmodels_bin` for esp32s3 and copies the generated
+ * srmodels.bin and partitions.csv into the artifact's esp_sr/ dir, exiting the whole build on failure.
+ * The srmodels_bin idf.py target is registered by esp-sr's CMake, so once esp-sr is removed from the
+ * manifest the target is unknown and the step fails the esp32s3 build; removing the esp_sr feature
+ * therefore means removing this step too. Anchored on the unique esp32s3 guard line and its immediate
+ * srmodels_bin call, through the matching 4-space `fi` that closes the guard (the nested `if [ -f ... ]`
+ * closes at a deeper indent, so the first `\n    fi\n` after the anchor is the outer close). AR_SDK is
+ * defined and read only inside this block (measured 2026-11-14: it appears nowhere else in build.sh), so
+ * the removal is self-contained. Pure: takes and returns text. Fails loud if the block is absent, so an
+ * upstream layout change cannot silently leave the build-breaking step in place.
+ */
+export function stripEspSrModelStep(buildShText) {
+  const start = '\n    if [ "$target" == "esp32s3" ]; then\n        idf.py -DIDF_TARGET="$target" -DSDKCONFIG_DEFAULTS="$idf_libs_configs" srmodels_bin\n';
+  const startIdx = buildShText.indexOf(start);
+  if (startIdx === -1) {
+    throw new Error('stripEspSrModelStep: esp32s3 srmodels_bin block not found in build.sh (upstream layout changed; ADR-0017)');
+  }
+  const endAnchor = '\n    fi\n';
+  const endIdx = buildShText.indexOf(endAnchor, startIdx + start.length);
+  if (endIdx === -1) {
+    throw new Error('stripEspSrModelStep: unterminated esp32s3 srmodels_bin block in build.sh (ADR-0017)');
+  }
+  const removed = buildShText.slice(startIdx, endIdx + endAnchor.length);
+  // The end anchor is a first-match, not a structural brace match. Bound it both ways so an upstream
+  // reshape (a moved or dropped closing `fi`) fails loud rather than silently deleting the wrong span:
+  // the removed slice must carry the srmodels block's own markers, and must not overrun into the next
+  // build.sh section (ADR-0017).
+  for (const marker of ['srmodels.bin', 'AR_SDK']) {
+    if (!removed.includes(marker)) {
+      throw new Error(`stripEspSrModelStep: matched block is missing "${marker}"; the esp32s3 srmodels_bin block was reshaped upstream, refusing to delete the wrong span (ADR-0017)`);
+    }
+  }
+  for (const overrun of ['# Build Bootloaders', 'for boot_conf']) {
+    if (removed.includes(overrun)) {
+      throw new Error(`stripEspSrModelStep: matched block overruns into "${overrun}" (the closing fi was reshaped upstream); refusing to delete past the srmodels block (ADR-0017)`);
+    }
+  }
+  return buildShText.slice(0, startIdx) + buildShText.slice(endIdx + endAnchor.length);
+}
+
 // Apply our delta onto the cloned tree, as overlay rewrites (never numbered source patches, which are
 // reserved for consumer-ADR features). All steps are optional; the empty baseline and the later patched
 // releases share one code path. Where each step writes:
@@ -419,7 +499,8 @@ export function injectArduinoManifestStrip(buildShText, { arduinoCommit, scriptN
 function applyOverlay(builderDir, overlay) {
   const {
     managedComponentPins, sourcePins, removedComponents, removedArduinoComponents,
-    removedDefconfigSymbols, addedDefconfigLines, builderCxxStandard, builderCxxRemoveDefines,
+    removedDefconfigSymbols, addedDefconfigLines, removedBuildFeatures,
+    builderCxxStandard, builderCxxRemoveDefines,
   } = overlay;
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
@@ -444,6 +525,12 @@ function applyOverlay(builderDir, overlay) {
   // Append lines to a per-chip builder defconfig fragment (ADR-0013): esp32 gets CONFIG_ESP32_REV_MIN_3=y,
   // keyed by basename so build.sh picks it up in every phase via configs/defconfig.$target.
   applyAddedDefconfigLines(join(builderDir, 'configs'), addedDefconfigLines);
+  // Remove builder build features (ADR-0017): drop esp_sr from the esp32s3 target so build.sh stops
+  // composing configs/defconfig.esp_sr into the esp32s3 libs (its srmodels_bin step is stripped below).
+  if (removedBuildFeatures && Object.keys(removedBuildFeatures).length) {
+    const buildsJsonPath = join(builderDir, 'configs', 'builds.json');
+    writeFileSync(buildsJsonPath, removeBuildFeatures(readFileSync(buildsJsonPath, 'utf8'), removedBuildFeatures));
+  }
   const manifestPath = join(builderDir, 'main', 'idf_component.yml');
   const removals = removedComponents ?? [];
   if (removals.length) {
@@ -454,9 +541,19 @@ function applyOverlay(builderDir, overlay) {
     writeFileSync(manifestPath, pinComponentVersions(readFileSync(manifestPath, 'utf8'), pins));
   }
   const arduinoStrip = removedArduinoComponents ?? [];
-  if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) {
+  if (arduinoStrip.length && !sourcePins?.arduinoCommit) {
+    // The strip anchors on the arduino force-checkout; without source pins that checkout is not
+    // injected, so a lock asking to strip arduino components but not pin them is incoherent.
+    throw new Error('applyOverlay: removedArduinoComponents requires sourcePins.arduinoCommit (the strip anchors on the arduino force-checkout; ADR-0011)');
+  }
+  // The esp_sr srmodels_bin step in build.sh is esp_sr's build wiring; removing the esp_sr feature
+  // removes it too, or the step's `idf.py srmodels_bin` (a target esp-sr's CMake registers) fails the
+  // esp32s3 build once esp-sr leaves the manifest (ADR-0017).
+  const stripSrModelStep = Boolean(removedBuildFeatures?.esp32s3?.includes('esp_sr'));
+  if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit || stripSrModelStep) {
     const buildShPath = join(builderDir, 'build.sh');
-    let buildSh = pinBuildSources(readFileSync(buildShPath, 'utf8'), sourcePins);
+    let buildSh = readFileSync(buildShPath, 'utf8');
+    if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) buildSh = pinBuildSources(buildSh, sourcePins);
     if (arduinoStrip.length) {
       cpSync(join(OVERLAY_DIR, ARDUINO_STRIP_SCRIPT), join(builderDir, ARDUINO_STRIP_SCRIPT));
       buildSh = injectArduinoManifestStrip(buildSh, {
@@ -466,22 +563,20 @@ function applyOverlay(builderDir, overlay) {
         components: arduinoStrip,
       });
     }
+    if (stripSrModelStep) buildSh = stripEspSrModelStep(buildSh);
     writeFileSync(buildShPath, buildSh);
-  } else if (arduinoStrip.length) {
-    // The strip anchors on the arduino force-checkout; without source pins that checkout is not
-    // injected, so a lock asking to strip arduino components but not pin them is incoherent.
-    throw new Error('applyOverlay: removedArduinoComponents requires sourcePins.arduinoCommit (the strip anchors on the arduino force-checkout; ADR-0011)');
   }
   const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
   const removeSummary = removals.join(', ') || 'none';
   const arduinoRemoveSummary = arduinoStrip.join(', ') || 'none';
   const defconfigSummary = removedDefconfigSymbols?.length ? `${removedDefconfigSymbols.length} symbol(s)` : 'none';
   const addedDefconfigSummary = Object.entries(addedDefconfigLines ?? {}).map(([f, l]) => `${f}+${l.length}`).join(', ') || 'none';
+  const buildFeatureSummary = Object.entries(removedBuildFeatures ?? {}).map(([t, f]) => `${t}-[${f.join(',')}]`).join(', ') || 'none';
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
   const cxxSummary = builderCxxStandard ? `${builderCxxStandard.from} -> ${builderCxxStandard.to}` : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, defconfig-add ${addedDefconfigSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, defconfig-add ${addedDefconfigSummary}, removed build features ${buildFeatureSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---

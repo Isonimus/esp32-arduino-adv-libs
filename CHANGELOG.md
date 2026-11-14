@@ -8,6 +8,20 @@ changelog.
 
 ## Unreleased
 
+- **Removed `esp-sr`, the last unused component.** The two consumer firmwares link no speech-recognition
+  API, so the overlay now drops `espressif/esp-sr` from the builder's `main/idf_component.yml`, the
+  `esp_sr` feature from the esp32s3 target in `configs/builds.json` (new `removedBuildFeatures` lock
+  field and the `removeBuildFeatures` overlay helper), and esp-sr's dedicated `idf.py srmodels_bin` step
+  from `build.sh` (`stripEspSrModelStep`): that step's target is registered by esp-sr's CMake, so keeping
+  it after the component is gone would fail the esp32s3 build. The esp32s3 libs lose the `esp_sr/` model
+  directory (`srmodels.bin`) and fall back to the common `FLASHSIZE_4MB` default (the `esp_sr` feature
+  had forced 16MB), matching esp32. Scenario A shape parity now subtracts deliberately-removed per-chip
+  subtrees (`removedChipSubtrees`), so dropping `esp32s3/esp_sr/` is explicit and reviewable while a kept
+  root going missing still fails. A `package`-time check (`scripts/0018-verify.mjs`, `npm run
+  verify:esp-sr`, CLAUDE.md section 4 invariant 10) asserts the model dir is gone and the flash size
+  reverted; `scripts/0012-verify.mjs` already asserts esp-sr is absent from each chip's
+  `dependencies.lock`. (ADR-0017, slice-0018)
+
 ---
 
 ## v0.0.2 (2026-11-14)
