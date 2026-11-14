@@ -49,8 +49,12 @@ function main(argv) {
   if (!zipPath) throw new Error('usage: node scripts/0014-verify.mjs <built-release.zip>');
   const lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8'));
   const added = lock.addedDefconfigLines ?? {};
-  const keys = Object.keys(added);
-  if (!keys.length) throw new Error('0014-verify: UPSTREAM.lock lists no addedDefconfigLines; nothing to prove (did the lock lose its REV_MIN append?)');
+  const chips = new Set(lock.enabledChips ?? []);
+  // addedDefconfigLines holds chip keys (defconfig.<chip>) and memory-fragment keys (e.g.
+  // defconfig.qio_ram, which scripts/0016-verify.mjs owns). This verify is about each chip's resolved
+  // config, so it considers only keys that name an enabled chip and leaves the rest to their own verify.
+  const keys = Object.keys(added).filter((k) => chips.has(chipOf(k)));
+  if (!keys.length) throw new Error('0014-verify: UPSTREAM.lock has no per-chip addedDefconfigLines entry; nothing to prove (did the lock lose its REV_MIN append?)');
 
   const results = [];
   let failed = false;

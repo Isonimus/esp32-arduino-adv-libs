@@ -8,6 +8,13 @@ changelog.
 
 ## Unreleased
 
+- **Fixed the esp32s3 boot loop on PSRAM-less boards.** A `v0.0.1` hardware test boot-looped a StampS3
+  Cardputer (no PSRAM): our esp32s3 quad/qspi libs enable `CONFIG_SPIRAM_BOOT_HW_INIT`, so the
+  boot-time PSRAM hardware init aborts when no chip is present. IDF 5.5 split that symbol out of
+  `SPIRAM_BOOT_INIT`, so the stock `defconfig.qio_ram`'s `# CONFIG_SPIRAM_BOOT_INIT is not set` no
+  longer disabled the init. The overlay now appends `CONFIG_SPIRAM_BOOT_HW_INIT=n` to
+  `defconfig.qio_ram`, matching the blob; the board boots on internal SRAM. `scripts/0016-verify.mjs`
+  and standing invariant 9 guard it. (ADR-0015, slice-0016)
 - **Fixed the esp32 drop-in: build for `ESP32_REV_MIN=3`.** A `v0.0.1` trial build measured that the
   unmodified esp32 libs overflow esp32 IRAM by 7272 bytes when a consumer firmware links against them
   (adversary `m5stick`), while both `esp32s3` targets and the reference blob link clean. The stock
