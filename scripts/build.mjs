@@ -27,10 +27,14 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { patchStack } from './lib/provenance.mjs';
 import { assertRequiredSourcePins } from './lib/source-pins.mjs';
+import { escapeRegExp } from './lib/regex.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PATCHES_DIR = join(REPO_ROOT, 'patches');
 const SDKCONFIG_DIR = join(REPO_ROOT, 'sdkconfig');
+const OVERLAY_DIR = join(REPO_ROOT, 'scripts', 'overlay');
+// The arduino manifest remover, copied into the builder tree and run in-container (ADR-0011).
+const ARDUINO_STRIP_SCRIPT = 'strip-manifest-components.py';
 const UPSTREAM_CLONE_URL = 'https://github.com/espressif/esp32-arduino-lib-builder.git';
 
 function lock() {
@@ -145,7 +149,8 @@ export function pinBuildSources(buildShText, { arduinoCommit, tinyusbCommit }) {
 
 function cmdChip(args) {
   requireArgs(args, 'work', 'image', 'chip', 'dist');
-  const { upstream, enabledChips, managedComponentPins, sourcePins, removedComponents, builderCxxStandard } = lock();
+  const lockData = lock();
+  const { upstream, enabledChips, sourcePins, builderCxxStandard } = lockData;
   if (!enabledChips.includes(args.chip)) {
     throw new Error(`chip "${args.chip}" is not in UPSTREAM.lock enabledChips ${JSON.stringify(enabledChips)}`);
   }
@@ -161,7 +166,7 @@ function cmdChip(args) {
     throw new Error('UPSTREAM.lock builderCxxStandard {from,to} is required: the pinned arduino master base needs C++20, but the builder forces gnu++17, so without this overlay the build fails deep in the compile (see ADR-0007)');
   }
   const builderDir = cloneUpstream(args.work, upstream);
-  applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents, builderCxxStandard);
+  applyOverlay(builderDir, lockData);
 
   // Build inside our image; override the entrypoint so we run build.sh directly. The container
   // runs as root, so it writes root-owned files into the mounted clone: fine on an ephemeral CI
@@ -197,7 +202,7 @@ function cmdChip(args) {
 export function pinComponentVersions(manifestText, pins) {
   const lines = manifestText.split('\n');
   for (const [component, version] of Object.entries(pins)) {
-    const escaped = component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegExp(component);
     const keyRe = new RegExp(`^(\\s+)${escaped}:\\s*$`);
     let keyIdx = -1;
     let keyIndent = '';
@@ -233,7 +238,7 @@ export function pinComponentVersions(manifestText, pins) {
 export function removeManagedComponents(manifestText, names) {
   const lines = manifestText.split('\n');
   for (const component of names) {
-    const escaped = component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegExp(component);
     const keyRe = new RegExp(`^(\\s+)${escaped}:\\s*$`);
     let keyIdx = -1;
     let keyIndent = '';
@@ -277,14 +282,87 @@ export function setBuilderCxxStandard(cmakeText, { from, to }) {
   return cmakeText.split(fromFlag).join(toFlag);
 }
 
-// Apply our delta onto the cloned tree: ordered patch stack, sdkconfig overlay, builder C++ standard,
-// managed-component removals, version pins, then floating-source commit pins. All are optional; the
-// loops exist so the empty baseline and the later patched releases share one code path. The C++ standard
-// rewrite touches the builder's root CMakeLists.txt; removals and pins (removedComponents,
-// managedComponentPins) rewrite main/idf_component.yml; source pins (sourcePins.arduinoCommit/tinyusbCommit)
-// inject force-checkouts into build.sh. All are build config applied as overlay rewrites, not numbered
-// source patches: those are reserved for consumer-ADR features (ADR-0004, ADR-0005, ADR-0006, ADR-0007).
-function applyOverlay(builderDir, managedComponentPins, sourcePins, removedComponents, builderCxxStandard) {
+/**
+ * Remove orphaned `CONFIG_...` assignment lines from a builder defconfig fragment. Removing a managed
+ * component (ADR-0006, ADR-0011) deletes its Kconfig, so a `defconfig.common` line that set one of its
+ * symbols (e.g. `CONFIG_ESP_INSIGHTS_ENABLED=y`, force-set by the stock builder) now names a symbol no
+ * Kconfig declares: IDF warns and ignores it. This is behaviour-neutral cleanup, it removes the
+ * warning, not a definition. Matches a line that assigns, or "is not set"-comments, EXACTLY the named
+ * symbol, so `CONFIG_ESP_INSIGHTS_COREDUMP_ENABLE` cannot take out the kept `CONFIG_ESP_COREDUMP_*`.
+ * Pure. Fails loud if a named symbol has no line, so a stale cleanup cannot silently no-op (ADR-0011).
+ */
+export function stripDefconfigSymbols(defconfigText, symbols) {
+  const lines = defconfigText.split('\n');
+  for (const symbol of symbols) {
+    const escaped = escapeRegExp(symbol);
+    const assignRe = new RegExp(`^${escaped}=`);
+    const notSetRe = new RegExp(`^# ${escaped} is not set$`);
+    const idx = lines.findIndex((l) => assignRe.test(l) || notSetRe.test(l));
+    if (idx === -1) {
+      throw new Error(`stripDefconfigSymbols: ${symbol} not found in defconfig (upstream changed, or already stripped; ADR-0011)`);
+    }
+    lines.splice(idx, 1);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Remove an orphaned `-D<define>` from the builder's root CMakeLists CXX_COMPILE_OPTIONS line. With
+ * the CHIP/Matter sources gone (ADR-0006), `-DCHIP_HAVE_CONFIG_H` on that line (the same line ADR-0007's
+ * setBuilderCxxStandard rewrites) is read by nothing. Removes the define and one adjacent `;` separator
+ * so the list stays well-formed. Pure. Fails loud if the define is absent, so a stale cleanup cannot
+ * silently no-op (ADR-0011).
+ */
+export function stripBuilderCxxDefine(cmakeText, define) {
+  const flag = `-D${define}`;
+  // Match the flag only as a whole CXX_COMPILE_OPTIONS list element. The right boundary is a real list
+  // terminator (';', the closing '"', whitespace, or end), so -DCHIP_HAVE_CONFIG_H matches neither the
+  // longer -DCHIP_HAVE_CONFIG_H_X (next char '_') nor the value form -DCHIP_HAVE_CONFIG_H=1 (next char
+  // '='). The leading `-D` is its own left boundary. One adjacent ';' separator is consumed so the list
+  // stays well-formed. Fail loud if the exact define is absent, so a stale cleanup cannot silently no-op.
+  const boundary = '(?=[;"\\s]|$)';
+  const re = new RegExp(`(?:;${escapeRegExp(flag)}${boundary}|${escapeRegExp(flag)}${boundary};?)`);
+  if (!re.test(cmakeText)) {
+    throw new Error(`stripBuilderCxxDefine: "${flag}" not found as a list element in CMakeLists.txt (upstream changed, or already stripped; ADR-0011)`);
+  }
+  return cmakeText.replace(re, '');
+}
+
+/**
+ * Inject the in-container arduino-manifest strip into build.sh, right after the arduino force-checkout
+ * pinBuildSources adds (ADR-0005). arduino-esp32's idf_component.yml only exists in-container (build.sh
+ * clones arduino), so the unused components it declares (Zigbee, the RainMaker cluster) are removed
+ * there, not host-side, by the python remover the overlay copies into the tree (ADR-0011). Anchors on
+ * the checkout line, so pinBuildSources must run first; fails loud if that anchor is absent, so a build
+ * that did not pin arduino cannot silently skip the strip. Pure: rewrites and returns the build.sh text.
+ */
+export function injectArduinoManifestStrip(buildShText, { arduinoCommit, scriptName, manifestPath, components }) {
+  if (!arduinoCommit) throw new Error('injectArduinoManifestStrip: arduinoCommit is required');
+  const anchor = `    git -C components/arduino checkout ${arduinoCommit}\n    if [ $? -ne 0 ]; then exit 1; fi\n`;
+  if (!buildShText.includes(anchor)) {
+    throw new Error('injectArduinoManifestStrip: arduino checkout anchor not found in build.sh (pinBuildSources must run first; ADR-0011)');
+  }
+  const injected = anchor +
+    '\n    # [adv-libs overlay] strip unused managed components arduino declares (ADR-0011)\n' +
+    `    python3 ${scriptName} ${manifestPath} ${components.join(' ')}\n` +
+    '    if [ $? -ne 0 ]; then exit 1; fi\n';
+  return buildShText.replace(anchor, injected);
+}
+
+// Apply our delta onto the cloned tree, as overlay rewrites (never numbered source patches, which are
+// reserved for consumer-ADR features). All steps are optional; the empty baseline and the later patched
+// releases share one code path. Where each step writes:
+//   - builder root CMakeLists.txt: C++ standard (ADR-0007), then strip the orphaned Matter define (ADR-0011)
+//   - configs/defconfig.common: strip the orphaned component symbols (ADR-0011)
+//   - main/idf_component.yml: component removals (ADR-0006) then version pins (ADR-0004)
+//   - build.sh: floating-source force-checkouts (ADR-0005), then the in-container arduino-manifest strip
+//     (ADR-0011): arduino's own manifest only exists in-container, so its unused components are removed
+//     there by the python remover this copies into the tree, not host-side.
+function applyOverlay(builderDir, overlay) {
+  const {
+    managedComponentPins, sourcePins, removedComponents, removedArduinoComponents,
+    removedDefconfigSymbols, builderCxxStandard, builderCxxRemoveDefines,
+  } = overlay;
   const stack = patchStack(PATCHES_DIR);
   for (const f of stack.files) {
     run('git', ['-C', builderDir, 'apply', '--verbose', join(PATCHES_DIR, f)]);
@@ -294,9 +372,16 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins, removedCompo
       cpSync(join(SDKCONFIG_DIR, f), join(builderDir, 'configs', f));
     }
   }
-  if (builderCxxStandard) {
+  if (builderCxxStandard || builderCxxRemoveDefines?.length) {
     const cmakePath = join(builderDir, 'CMakeLists.txt');
-    writeFileSync(cmakePath, setBuilderCxxStandard(readFileSync(cmakePath, 'utf8'), builderCxxStandard));
+    let cmake = readFileSync(cmakePath, 'utf8');
+    if (builderCxxStandard) cmake = setBuilderCxxStandard(cmake, builderCxxStandard);
+    for (const define of builderCxxRemoveDefines ?? []) cmake = stripBuilderCxxDefine(cmake, define);
+    writeFileSync(cmakePath, cmake);
+  }
+  if (removedDefconfigSymbols?.length) {
+    const defconfigPath = join(builderDir, 'configs', 'defconfig.common');
+    writeFileSync(defconfigPath, stripDefconfigSymbols(readFileSync(defconfigPath, 'utf8'), removedDefconfigSymbols));
   }
   const manifestPath = join(builderDir, 'main', 'idf_component.yml');
   const removals = removedComponents ?? [];
@@ -307,17 +392,34 @@ function applyOverlay(builderDir, managedComponentPins, sourcePins, removedCompo
   if (Object.keys(pins).length) {
     writeFileSync(manifestPath, pinComponentVersions(readFileSync(manifestPath, 'utf8'), pins));
   }
+  const arduinoStrip = removedArduinoComponents ?? [];
   if (sourcePins?.arduinoCommit || sourcePins?.tinyusbCommit) {
     const buildShPath = join(builderDir, 'build.sh');
-    writeFileSync(buildShPath, pinBuildSources(readFileSync(buildShPath, 'utf8'), sourcePins));
+    let buildSh = pinBuildSources(readFileSync(buildShPath, 'utf8'), sourcePins);
+    if (arduinoStrip.length) {
+      cpSync(join(OVERLAY_DIR, ARDUINO_STRIP_SCRIPT), join(builderDir, ARDUINO_STRIP_SCRIPT));
+      buildSh = injectArduinoManifestStrip(buildSh, {
+        arduinoCommit: sourcePins.arduinoCommit,
+        scriptName: ARDUINO_STRIP_SCRIPT,
+        manifestPath: 'components/arduino/idf_component.yml',
+        components: arduinoStrip,
+      });
+    }
+    writeFileSync(buildShPath, buildSh);
+  } else if (arduinoStrip.length) {
+    // The strip anchors on the arduino force-checkout; without source pins that checkout is not
+    // injected, so a lock asking to strip arduino components but not pin them is incoherent.
+    throw new Error('applyOverlay: removedArduinoComponents requires sourcePins.arduinoCommit (the strip anchors on the arduino force-checkout; ADR-0011)');
   }
   const pinSummary = Object.entries(pins).map(([k, v]) => `${k}@${v}`).join(', ') || 'none';
   const removeSummary = removals.join(', ') || 'none';
+  const arduinoRemoveSummary = arduinoStrip.join(', ') || 'none';
+  const defconfigSummary = removedDefconfigSymbols?.length ? `${removedDefconfigSymbols.length} symbol(s)` : 'none';
   const srcSummary = sourcePins
     ? `idf@${sourcePins.idfCommit?.slice(0, 10)} arduino@${sourcePins.arduinoCommit?.slice(0, 10)} tinyusb@${sourcePins.tinyusbCommit?.slice(0, 10)}`
     : 'none';
   const cxxSummary = builderCxxStandard ? `${builderCxxStandard.from} -> ${builderCxxStandard.to}` : 'none';
-  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed components ${removeSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
+  console.log(`applied overlay: ${stack.count} patch(es), sdkconfig ${existsSync(SDKCONFIG_DIR) ? 'present' : 'none'}, builder c++ std ${cxxSummary}, removed-define ${(builderCxxRemoveDefines ?? []).join(', ') || 'none'}, defconfig-strip ${defconfigSummary}, removed components ${removeSummary}, removed arduino components ${arduinoRemoveSummary}, component pins ${pinSummary}, source pins ${srcSummary}`);
 }
 
 // --- package: combine per-chip tars into the Bruce-shaped zip + manifest ---
@@ -400,7 +502,7 @@ function cmdPackage(args) {
 // commented-out FROM, a second build stage, or a longer tag like 22.04.1 cannot be mis-pinned
 // (slice-0002 adversarial pass, F6). sourceLabel only names the file in the error message.
 export function pinDockerfileFrom(text, baseImage, baseDigest, sourceLabel = 'the Dockerfile') {
-  const escaped = baseImage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = escapeRegExp(baseImage);
   const fromLine = new RegExp(`^FROM\\s+${escaped}(?=\\s|$)`, 'gm');
   const matches = text.match(fromLine) ?? [];
   if (matches.length !== 1) {

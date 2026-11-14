@@ -8,6 +8,21 @@ changelog.
 
 ## Unreleased
 
+- **Slimmed the build to what the consumers use.** Removed the unused Zigbee, RainMaker, TFLite-Micro
+  and camera stack so the released libs no longer download or build it: `esp32-camera` and
+  `esp-tflite-micro` from the builder's `main/idf_component.yml`, and the Zigbee pair plus the whole
+  RainMaker cluster from arduino-esp32's own manifest. Arduino's manifest only exists inside the build
+  container, so it is edited in-container by a dependency-free python remover the overlay injects into
+  `build.sh` after the arduino checkout (ADR-0011); the builder image has no node. Every removed
+  component's arduino library self-disables through a Kconfig symbol the component owns (measured, zero
+  unconditional uses on esp32/esp32s3), so nothing needs patching. Also cleaned the now-orphaned
+  `defconfig.common` symbols (Matter, RainMaker, Insights, Diagnostics) and the `-DCHIP_HAVE_CONFIG_H`
+  Matter define, behaviour-neutral since the symbols are already undeclared. A `package`-time check
+  (`scripts/0012-verify.mjs`, `npm run verify:slim`, CLAUDE.md section 4 invariant 7) asserts no removed
+  component appears in either chip's resolved `dependencies.lock`. `esp-sr` is slated for its own slice
+  (it is entangled with the builder's `esp_sr` feature). `managedComponentPins` is now empty
+  (`esp-tflite-micro` was its only entry and is removed).
+
 - **Source-pin reachability preflight.** A CI `pins` job proves every `UPSTREAM.lock`
   `sourcePins` commit is ancestor-reachable from the branch the builder clones, gating the
   `chips` matrix so an unreachable pin fails in seconds instead of at `git checkout` after a

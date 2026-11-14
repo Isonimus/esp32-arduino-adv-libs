@@ -121,6 +121,8 @@ jobs:
         run: node scripts/build.mjs package --dist dist --out out --image-digest "${{ needs.image.outputs.id }}"
       - name: Verify drop-in shape, manifest, and baseline (Scenarios A/C/D)
         run: node scripts/0002-verify.mjs out/adv-esp32-arduino-libs-*.zip out/manifest.json
+      - name: Verify the unused component stack is absent from the resolved tree (slice-0012)
+        run: node scripts/0012-verify.mjs out/adv-esp32-arduino-libs-*.zip
       - uses: actions/upload-artifact@v7
         with:
           name: release-bundle

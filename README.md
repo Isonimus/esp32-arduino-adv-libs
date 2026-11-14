@@ -92,7 +92,13 @@ touching the overlay builds every chip and fails whole on any chip failing, but 
   the managed-component version pins (`managedComponentPins`, applied to the builder's
   `main/idf_component.yml` so the component manager cannot resolve a floating "latest", see
   [`adr/0004-managed-component-version-pins.md`](adr/0004-managed-component-version-pins.md)); the
-  enabled chip set; the builder image base digest; and the reference blob the drop-in check
+  unused managed components removed so they are neither downloaded nor built (`removedComponents` from
+  the builder's `main` manifest, and `removedArduinoComponents` from arduino-esp32's own manifest,
+  edited in-container, with the orphaned build config cleaned by `removedDefconfigSymbols` and
+  `builderCxxRemoveDefines`, see
+  [`adr/0006-remove-unused-managed-components.md`](adr/0006-remove-unused-managed-components.md) and
+  [`adr/0011-finish-component-slim-in-container-arduino-manifest.md`](adr/0011-finish-component-slim-in-container-arduino-manifest.md));
+  the enabled chip set; the builder image base digest; and the reference blob the drop-in check
   compares against.
 - [`reference/bruce-blob-layout.json`](reference/bruce-blob-layout.json): the measured layout of the
   blob the consumers pin today, captured once by `scripts/bruce-blob-shape-probe.mjs` and used as the
