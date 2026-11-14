@@ -135,3 +135,20 @@ back to the per-chip prefix), fail loud if absent, and use `"$weaken_nm"` in the
 dependency on the build environment the guard exists to surface, caught before any publish. A unit test
 now asserts the generated block resolves a prefixed `nm` and never calls bare `nm`. A second CI build
 confirms the fix in a further amendment below.
+
+## Amendment: 2026-11-14 Second CI build confirms the shipped artifact is weak
+
+CI run `43648597057` (build-only `workflow_dispatch` on `feat/weak-deauth`, publish skipped) finished all
+six jobs green: `pins`, `prep`, `image`, both `chips` legs, and `package`. The `nm` fix resolved the
+first build's failure.
+
+- Scenario 1 (artifact weak), on the real CI artifact: met. The `package` job's `0020-verify` reported
+  `esp32/lib/libnet80211.a: ieee80211_raw_frame_sanity_check is weak (W)` and the same for `esp32s3`, so
+  the shipped archive carries the symbol weak on both chips (host `nm` on the GitHub runner reads the
+  xtensa archives fine).
+- Both chips green: met. Injecting the weaken step broke neither build, and the existing verifies
+  (`0012`, `0014`, `0016`, `0018`) stayed green (no regression).
+
+Scenario 4 (the `adversary` consumer-link re-trial with its `weaken_deauth` hook disabled) is the only
+one outstanding; it is recorded in a further amendment below once the firmware is built and the board
+flashed.
