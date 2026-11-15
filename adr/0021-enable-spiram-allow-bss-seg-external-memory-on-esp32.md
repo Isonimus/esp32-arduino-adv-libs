@@ -2,10 +2,10 @@
 id: '0021'
 title: "Enable CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY on the esp32 libs so consumers place static buffers in PSRAM via EXT_RAM_BSS_ATTR"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-11-15
 supersedes: []
-superseded_by: []
+superseded_by: ['0028']
 ---
 
 ## Context

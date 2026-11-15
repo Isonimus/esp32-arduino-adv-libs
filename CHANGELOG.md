@@ -8,6 +8,30 @@ changelog.
 
 ## Unreleased
 
+- **Withdraw patch #2 (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`); re-release with patch #1 alone.**
+  Patch #2 shipped in `v0.1.0` and crash-loops **every esp32 board**: the flag activates `EXT_RAM_BSS_ATTR`
+  for the Arduino core's own globals, which these libs place in `.ext_ram.bss` but never zero (PSRAM
+  boot-init is off, ADR-0015), so the core dereferences the uninitialised `0xaa` fill and
+  `LoadProhibited`-panics at boot (measured on-device, `esp32-wifi-sapper:ADR-0123`, reproduced on the
+  M5StickC Plus2 and the CYD; esp32s3 unaffected, patch #2 is esp32-only). `ALLOW_BSS=y` with a late
+  `psramInit()` is an invalid sdkconfig combination; its one driver (`esp32-wifi-sapper:ADR-0080`'s static
+  manifest) was independently infeasible (polymorphic constructor runs before `psramInit()`) and no
+  consumer uses the attribute, so it is removed, not fixed. The overlay drops the `configs/defconfig.esp32`
+  append, `scripts/0022-verify.mjs` + `npm run verify:spiram-bss` are deleted, and CLAUDE.md section 4
+  invariant 12 is withdrawn. Patch #1 (weak deauth symbol) is unaffected and still ships. `v0.1.0` is
+  withdrawn as a consumer target; use the patch-#1-only re-release. On-device boot of an esp32 and an
+  esp32s3 board is now a required pre-tag gate (ADR-0028 decision 4). (ADR-0028, slice-0029)
+
+---
+
+## v0.1.0 (2026-11-15)
+
+Patches release: on top of `v0.0.2`'s component slim and sdkconfig link/boot fixes, added patch #1 (weak
+deauth symbol), patch #2 (esp32 `SPIRAM_ALLOW_BSS`), and the `esp-sr` removal, built and published for
+`esp32` and `esp32s3` (tag `v0.1.0`). Adopted by both consumer firmwares, then found on-device to
+crash-loop every esp32 board through patch #2; patch #2 is **withdrawn** (see Unreleased, ADR-0028) and
+`v0.1.0` must not be used on esp32.
+
 - **Enable `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` on the `esp32` libs (patch #2).** The consumer
   `esp32-wifi-sapper` overflowed classic-ESP32 static DRAM (`.dram0.bss` by 28816 bytes on the M5StickC
   Plus2) with two ~28 KB buffers, and the clean fix (tag them `EXT_RAM_BSS_ATTR` so they land in
