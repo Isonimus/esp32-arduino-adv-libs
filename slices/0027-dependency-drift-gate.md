@@ -114,3 +114,26 @@ resolution change.
 Filled in at merge, in past tense, confirming each Definition-of-Done scenario was met or recording the
 deviation. The snapshot capture, the CI build, and the verify fail-before/pass-after results are recorded
 in amendments below at merge.
+
+## Amendment: 2026-11-15 Bootstrap build, snapshot captured, gate fail-before/pass-after
+
+Shipped as designed. CI run 43703394331 (workflow_dispatch on `feat/dependency-drift-gate`, commit
+`efae0cc`) built both chips green (prep, pins, image, chips(esp32), chips(esp32s3) all success) and
+uploaded the `release-bundle` artifact (`adv-esp32-arduino-libs-v5.5-20261115-e68e301.zip`) in the
+`package` job before the verify steps, as the reorder intended. On that run the drift gate FAILED at its
+step because no snapshot was committed yet: `scripts/0027-verify.mjs` reported `FAIL esp32: no committed
+snapshot ...` and `FAIL esp32s3: no committed snapshot ...` (Definition-of-Done scenario 3, and the
+per-chip reporting confirmed, both chips named in one run), and the job went red there while every earlier
+verify passed.
+
+The two committed snapshots were captured verbatim from that build's zip:
+`reference/dependencies.lock.esp32` (10 resolved components) and `reference/dependencies.lock.esp32s3` (8
+resolved components). esp32s3 carries no esp-sr / esp-dl / dl_fft / cjson / esp_new_jpeg: the esp-sr stack
+removed by ADR-0017. This is why the v0.0.2 artifact's lock could not seed the snapshot (its esp32s3 tree
+still had esp-sr), and why the baseline had to come from a build on the current lock.
+
+The same gate then PASSED locally against that identical CI-built zip once the snapshots were committed:
+"ok esp32: 10 resolved component(s) match the committed snapshot", "ok esp32s3: 8 resolved component(s)
+match the committed snapshot" (Definition-of-Done scenarios 1 and 2's pass path). Fail-before /
+pass-after is therefore proven against the real artifact. The green-in-CI confirmation is the re-dispatched
+build on this branch with the snapshots committed, recorded below.
