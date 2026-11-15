@@ -6,7 +6,12 @@ changelog.
 
 ---
 
-## Unreleased
+## v0.1.1 (2026-11-15)
+
+Corrective release: withdraws patch #2 and re-ships patch #1 alone, built and published for `esp32` and
+`esp32s3` (tag `v0.1.1`, release run `43727341068`). Boot-verified on device before the tag: the
+M5StickC Plus2 (esp32 + 2 MB PSRAM, the board `v0.1.0` bricked) and the T-embed (esp32s3, 8 MB octal PSRAM)
+both boot clean. `v0.1.0` is withdrawn (marked on its GitHub Release); it must not be used on esp32.
 
 - **Withdraw patch #2 (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`); re-release with patch #1 alone.**
   Patch #2 shipped in `v0.1.0` and crash-loops **every esp32 board**: the flag activates `EXT_RAM_BSS_ATTR`
