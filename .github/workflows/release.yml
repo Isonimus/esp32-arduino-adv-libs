@@ -119,6 +119,17 @@ jobs:
       - name: Combine, package, and emit the five-pin manifest
         # package mode fails if any enabled chip tar is missing (Scenario B: no partial release).
         run: node scripts/build.mjs package --dist dist --out out --image-digest "${{ needs.image.outputs.id }}"
+      - uses: actions/upload-artifact@v7
+        # Uploaded BEFORE the verifies (slice-0027): so the built artifact is available to inspect when a
+        # gate fails, and so the dependency-drift snapshot is capturable from a failing bootstrap run. This
+        # is only the internal CI artifact; the published GitHub Release is the tag-gated step below, which
+        # still runs last and only if every verify passed, so a failed gate publishes nothing.
+        with:
+          name: release-bundle
+          path: |
+            out/adv-esp32-arduino-libs-*.zip
+            out/adv-esp32-arduino-libs-*.zip.sha256
+            out/manifest.json
       - name: Verify drop-in shape, manifest, and baseline (Scenarios A/C/D)
         run: node scripts/0002-verify.mjs out/adv-esp32-arduino-libs-*.zip out/manifest.json
       - name: Verify the unused component stack is absent from the resolved tree (slice-0012)
@@ -133,13 +144,8 @@ jobs:
         run: node scripts/0020-verify.mjs out/adv-esp32-arduino-libs-*.zip
       - name: Verify esp32 ships SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY for static PSRAM .bss (patch #2, slice-0022)
         run: node scripts/0022-verify.mjs out/adv-esp32-arduino-libs-*.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-bundle
-          path: |
-            out/adv-esp32-arduino-libs-*.zip
-            out/adv-esp32-arduino-libs-*.zip.sha256
-            out/manifest.json
+      - name: Verify the resolved dependency tree matches the committed snapshot (drift gate, slice-0027)
+        run: node scripts/0027-verify.mjs out/adv-esp32-arduino-libs-*.zip
       - name: Publish the GitHub Release (tag v* only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
