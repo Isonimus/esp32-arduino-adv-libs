@@ -51,6 +51,9 @@ function extract(zipPath, entry) {
 
 // Each esp32/<variant>/include/sdkconfig.h in the zip. Discovered rather than hardcoded so a builder that
 // adds or renames a memory variant is checked too (and the count can never silently drop to zero).
+// Coverage assumes a consumer-selectable variant ships its header at this exact path, which is the stable
+// arduino-esp32 precompiled-libs layout; a header packaged elsewhere would escape the check (no present
+// trigger, so not guarded here rather than guessed at a second path).
 function variantHeaders(zipPath) {
   const re = new RegExp(`^${CHIP}/([^/]+)/include/sdkconfig\\.h$`);
   return listEntries(zipPath)
