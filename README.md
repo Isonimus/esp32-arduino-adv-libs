@@ -28,15 +28,15 @@ repo; nothing else changes:
 platform_packages =
     ; before: the third-party Bruce blob
     ; framework-arduinoespressif32-libs @ https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip
-    ; after: the latest release of this repo. NOTE: v0.1.0 is WITHDRAWN (patch #2 crash-loops
-    ; every esp32 board, ADR-0028); use the re-release that carries patch #1 alone.
-    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/<latest>/adv-esp32-arduino-libs-<build>.zip
+    ; after: a release of this repo (current: v0.1.1, patch #1 only). NOTE: v0.1.0 is WITHDRAWN,
+    ; it crash-loops every esp32 board (patch #2, ADR-0028).
+    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.1.1/adv-esp32-arduino-libs-v5.5-20261115-e68e301.zip
 ```
 
 The zip's internal layout is a drop-in: the per-chip directories (`esp32/`, `esp32s3/`) sit at the
 zip root alongside `package.json`, `tools.json`, and `versions.txt`, which is the shape PlatformIO
-expects of the `framework-arduinoespressif32-libs` package. The current drop-in carries **patch #1
-alone**. Patch #1 ships `libnet80211.a` with `ieee80211_raw_frame_sanity_check` **weak**, so a consumer's
+expects of the `framework-arduinoespressif32-libs` package. The current drop-in is **`v0.1.1`**, which
+carries **patch #1 alone**. Patch #1 ships `libnet80211.a` with `ieee80211_raw_frame_sanity_check` **weak**, so a consumer's
 `deauth.cpp` override links without a post-fetch `objcopy` hook (`adversary:ADR-0027`,
 `adversary:ADR-0029`); it ships as a lock-driven `objcopy --weaken-symbol` in the build, not a numbered
 source patch, so `patchStackHash` stays the empty-stack sentinel.
@@ -45,8 +45,9 @@ source patch, so `patchStackHash` stays the empty-stack sentinel.
 `EXT_RAM_BSS_ATTR` buffer into PSRAM-backed `.ext_ram.bss`), but patch #2 is **withdrawn** (ADR-0028,
 supersedes ADR-0021): on esp32 the flag relocates the Arduino core's own globals into a `.ext_ram.bss`
 segment these libs never zero (PSRAM boot-init is off), so `v0.1.0` `LoadProhibited`-crash-loops every
-esp32 board (measured on-device, `esp32-wifi-sapper:ADR-0123`). **`v0.1.0` must not be used on esp32**; the
-re-release drops patch #2 and carries patch #1 alone. `v0.0.2` is the prior drop-in (the slim and
+esp32 board (measured on-device, `esp32-wifi-sapper:ADR-0123`). **`v0.1.0` must not be used on esp32**;
+`v0.1.1` drops patch #2 and carries patch #1 alone, boot-verified on an esp32 and an esp32s3 board before
+tagging (ADR-0028). `v0.0.2` is the prior drop-in (the slim and
 link/boot fixes, no patches); the earliest `v0.0.1` is the **unmodified** baseline and is not a working
 drop-in (it overflows esp32 IRAM and boot-loops a PSRAM-less esp32s3). The roadmap's remaining patches
 (#3, #4, #5) were each probed and withdrawn before shipping, and patch #2 is withdrawn after shipping, so

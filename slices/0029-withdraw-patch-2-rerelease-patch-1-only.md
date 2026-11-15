@@ -91,3 +91,36 @@ Filled in at merge, in past tense, confirming each Definition-of-Done scenario w
 deviation. The config-surface absence and the per-chip build/weak-symbol results are recorded in an
 amendment below when the release build is green; the on-device esp32 and esp32s3 boot proofs are recorded
 when the operator runs them, and the release is tagged only after they pass.
+
+## Amendment: 2026-11-15 Shipped as v0.1.1; boot-verified on esp32 and esp32s3 before the tag
+
+Shipped as designed. Published as `v0.1.1` (release run `43727341068`, asset
+`adv-esp32-arduino-libs-v5.5-20261115-e68e301.zip`), with `v0.1.0` withdrawn on its GitHub Release.
+
+**Definition-of-Done scenario 1 (config-surface absence), met.** Both chips built green on the tag build
+and on the prior `main` build-only run (`43724215684`, same commit `01f30cf`). Unzipping the built release:
+the esp32 base `sdkconfig` reads `# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is not set`, both esp32
+variant headers (`qio_qspi`, `dio_qspi`) do not define the symbol, and `CONFIG_ESP32_REV_MIN_3=y` is kept
+(the REV_MIN append survived the removal). The SHA-256 sidecar matched. This is the inverse of the deleted
+`0022-verify.mjs`, confirmed once by hand at merge as the slice's Verification section foresaw.
+
+**Definition-of-Done scenario 3 (patch #1 still weak), met.** `scripts/0020-verify.mjs` passed in the
+`release.yml` `package` job on both builds (`nm` reports `ieee80211_raw_frame_sanity_check` weak on each
+chip); the `0027` drift gate also passed, so the dependency tree is unchanged.
+
+**Definition-of-Done scenario 2 (on-device boot), met.** A consumer (`esp32-wifi-sapper`) env was pointed
+at the build-only artifact of `main@01f30cf` and flashed to two boards (its `platformio.ini` edit was
+temporary and reverted after):
+
+- **esp32 + PSRAM, M5StickC Plus2** (the board `v0.1.0` crash-looped with `EXCVADDR=0xaaaaa9dc`): one
+  `POWERON_RESET`, no reboot loop, zero crash markers (no `Guru Meditation` / `LoadProhibited` / backtrace)
+  across the capture window, reaching `[STATE] phase=provisioning heap_free=161496 heap_max=2064372
+  disp=240x135` (2 MB PSRAM up, display live). The `.ext_ram.bss` corruption is gone.
+- **esp32s3, T-embed** (never affected, patch #2 is esp32-only): clean boot, zero crash markers,
+  `[STATE] phase=station_connect heap_free=140900 heap_max=8257524 disp=320x170` (8 MB octal PSRAM up).
+
+The boot-tested artifact and the published `v0.1.1` asset are both builds of `main@01f30cf` and are
+functionally identical (same verified sdkconfig surfaces and same weak symbol, asserted by the `package`-job
+verifies on both), though not bit-identical: the release payload is not yet byte-reproducible by design
+(ADR-0026, LEDGER). The ADR-0028 decision 4 gate (boot an esp32 and an esp32s3 board before tagging) was
+met before `v0.1.1` was tagged.
