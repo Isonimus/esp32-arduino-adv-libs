@@ -29,16 +29,23 @@ platform_packages =
     ; before: the third-party Bruce blob
     ; framework-arduinoespressif32-libs @ https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip
     ; after: a release of this repo
-    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.0.2/adv-esp32-arduino-libs-v5.5-20261114-e68e301.zip
+    framework-arduinoespressif32-libs @ https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.1.0/adv-esp32-arduino-libs-v5.5-20261115-e68e301.zip
 ```
 
 The zip's internal layout is a drop-in: the per-chip directories (`esp32/`, `esp32s3/`) sit at the
 zip root alongside `package.json`, `tools.json`, and `versions.txt`, which is the shape PlatformIO
-expects of the `framework-arduinoespressif32-libs` package. `v0.0.2` is the current drop-in: an
-overlay build (no numbered patches yet) carrying the component slim and the two sdkconfig fixes that
-make it link on esp32 and boot on a PSRAM-less esp32s3. The earlier `v0.0.1` is the **unmodified**
-baseline and is not a working drop-in (it overflows esp32 IRAM and boot-loops a PSRAM-less esp32s3).
-Later releases add one numbered patch each, every patch tracing to a consumer ADR.
+expects of the `framework-arduinoespressif32-libs` package. `v0.1.0` is the current drop-in: on top of
+the component slim and the sdkconfig link/boot fixes that `v0.0.2` already carried, it adds the two
+consumer-driven patches. Patch #1 ships `libnet80211.a` with `ieee80211_raw_frame_sanity_check` **weak**,
+so a consumer's `deauth.cpp` override links without a post-fetch `objcopy` hook (`adversary:ADR-0027`,
+`adversary:ADR-0029`). Patch #2 sets `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`, so a static
+`EXT_RAM_BSS_ATTR` buffer lands in PSRAM-backed `.ext_ram.bss` instead of overflowing DRAM
+(`esp32-wifi-sapper:ADR-0080`). Both ship as lock-driven overlay operations (an `objcopy --weaken-symbol`
+in the build, a `defconfig` append), not numbered source patches, so `patchStackHash` stays the
+empty-stack sentinel. `v0.0.2` is the prior drop-in (the slim and link/boot fixes, no patches); the
+earliest `v0.0.1` is the **unmodified** baseline and is not a working drop-in (it overflows esp32 IRAM and
+boot-loops a PSRAM-less esp32s3). The roadmap's remaining patches (#3, #4, #5) were each probed and
+withdrawn after measurement, so no further overlay patch is pending; see the `adr/` corpus.
 
 ## Provenance
 
@@ -49,11 +56,22 @@ Every release carries a `manifest.json` recording the five pins that reconstruct
 | `upstreamBuilderCommit` | `espressif/esp32-arduino-lib-builder` commit, from `UPSTREAM.lock` |
 | `resolvedIdfCommit` | ESP-IDF commit the build actually used, read from `versions.txt` |
 | `resolvedArduinoCommit` | Arduino-core commit the build actually used, read from `versions.txt` |
-| `patchStackHash` | SHA-256 over the ordered `patches/*.patch`; the empty-stack sentinel for `v0.0.1` |
+| `patchStackHash` | SHA-256 over the ordered `patches/*.patch`; the empty-stack sentinel while the patch stack is empty (the shipped fixes are lock-driven overlay operations, not numbered source patches) |
 | `builderImageDigest` | ID of the builder image a release was built in, from the pinned Dockerfile (base pinned by digest). Attests the image used; full bit-reproducibility of the image (pinning its apt/pip layers) is deferred, see `LEDGER.md` |
 
 The release also carries the zip's SHA-256 (`.zip.sha256`). A release that cannot be rebuilt from
 those inputs has no provenance guarantee, so the build fails rather than ship one.
+
+Beyond the five pins, every release's **resolved dependency tree** is pinned. The component manager
+resolves the transitive components (esp-dsp, esp-modbus, the kept arduino deps, and the rest) at build
+time; each chip's resolved `dependencies.lock` is captured as a committed
+[`reference/dependencies.lock.<chip>`](reference/) snapshot, and the build fails on any drift of a
+resolved version or content hash, so a silent transitive bump becomes a reviewed, re-blessed change.
+ADR-0001 section 6's original byte-for-byte rebuild gate was re-scoped to this achievable form (the zip
+name and manifest carry the build date, and the builder image and compiler are not bit-pinned); full
+toolchain bit-determinism is deferred, see
+[`adr/0026-rescope-reproducibility-gate-to-dependency-drift.md`](adr/0026-rescope-reproducibility-gate-to-dependency-drift.md)
+and `LEDGER.md`.
 
 ## Build locally
 
@@ -109,8 +127,9 @@ touching the overlay builds every chip and fails whole on any chip failing, but 
 - [`reference/bruce-blob-layout.json`](reference/bruce-blob-layout.json): the measured layout of the
   blob the consumers pin today, captured once by `scripts/bruce-blob-shape-probe.mjs` and used as the
   drop-in-parity reference. Regenerate with `npm run probe:bruce-blob`.
-- [`patches/`](patches): the ordered patch stack (empty at `v0.0.1`). Each patch is one concern and
-  cites the consumer ADR that demands it.
+- [`patches/`](patches): the ordered numbered patch stack (still empty: the shipped fixes are lock-driven
+  overlay operations, not `patches/*.patch` files). A numbered patch would be one concern and cite the
+  consumer ADR that demands it.
 
 ## License
 
