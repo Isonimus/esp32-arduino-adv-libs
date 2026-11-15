@@ -2,10 +2,10 @@
 id: '0022'
 title: "Add the esp32 SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY sdkconfig-append overlay so consumers get static PSRAM .bss"
 type: slice
-status: accepted
+status: superseded
 date: 2026-11-15
 supersedes: []
-superseded_by: []
+superseded_by: ['0029']
 ---
 
 ## Goal
