@@ -137,3 +137,14 @@ The same gate then PASSED locally against that identical CI-built zip once the s
 match the committed snapshot" (Definition-of-Done scenarios 1 and 2's pass path). Fail-before /
 pass-after is therefore proven against the real artifact. The green-in-CI confirmation is the re-dispatched
 build on this branch with the snapshots committed, recorded below.
+
+## Amendment: 2026-11-15 Gate green in CI, run-to-run resolution stable
+
+The re-dispatched build, CI run 43705210575 (workflow_dispatch on `feat/dependency-drift-gate`, commit
+`4ad2c35` with the snapshots committed), passed every job including the `package` job: the drift gate step
+logged "ok esp32: 10 resolved component(s) match the committed snapshot" and the esp32s3 equivalent, and
+the job went green. This is the green-in-CI confirmation (Definition-of-Done scenario 1 on the real
+pipeline), and because this was a second independent build whose freshly resolved tree matched the snapshot
+captured from the first, it also confirms the component resolution is stable run to run (the drift the gate
+exists to catch did not occur between two builds minutes apart). All three Definition-of-Done scenarios are
+met; the slice is ready to land.
